@@ -568,6 +568,49 @@ const FILTERS = [
   ['phim-chieu-rap', 'Chiếu rạp'],
 ];
 
+/* nạp thêm phim vào lưới hiện tại (không đổi trang) */
+function bindLoadMore({ params, pageNum, totalPages }) {
+  const btn = document.getElementById('loadMore');
+  if (!btn) return;
+  let page = pageNum;
+  let busy = false;
+  const run = async () => {
+    if (busy) return;
+    busy = true;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Đang tải...';
+    try {
+      const next = page + 1;
+      const res = await api('movies', { ...BASE, select: CARD_FIELDS, order: NEWEST, ...params }, { page: next, paged: true });
+      const box = document.querySelector('#gridBox .grid');
+      if (box && res.rows.length) box.insertAdjacentHTML('beforeend', res.rows.map(card).join(''));
+      page = next;
+      if (page >= totalPages) btn.remove();
+      else {
+        btn.disabled = false;
+        btn.textContent = label;
+        /* nếu nút vẫn nằm trong tầm nhìn thì nạp tiếp cho tới khi đầy màn hình */
+        if (btn.getBoundingClientRect().top < window.innerHeight + 500) setTimeout(run, 200);
+      }
+    } catch {
+      btn.disabled = false;
+      btn.textContent = 'Lỗi, thử lại';
+    } finally {
+      busy = false;
+    }
+  };
+  btn.addEventListener('click', run);
+  /* tự nạp khi cuộn gần tới nút */
+  const onScroll = () => {
+    if (!document.body.contains(btn)) { removeEventListener('scroll', onScroll); return; }
+    if (btn.disabled) return;
+    if (btn.getBoundingClientRect().top < window.innerHeight + 500) run();
+  };
+  addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+}
+
 async function renderCollection(opts) {
   const { title, params, base, page = 1, crumbsParts, active, pagerFor, canonPath } = opts;
   const pageNum = Math.max(1, parseInt(page) || 1);
@@ -600,8 +643,10 @@ async function renderCollection(opts) {
           <a href="/loc-phim${active === 'loc-phim' ? ' class="on"' : ''}">Lọc nâng cao</a>
         </div>
       </div>
-      <section class="section">${res.rows.length ? gridHtml(res.rows) : emptyBox('Không có phim nào.')}</section>
+      <section class="section" id="gridBox">${res.rows.length ? gridHtml(res.rows) : emptyBox('Không có phim nào.')}</section>
+      ${pageNum < res.totalPages ? `<div class="btnrow" style="justify-content:center;margin:16px 0"><button class="btn btn--primary" type="button" id="loadMore">Tải thêm phim</button></div>` : ''}
       ${pager(pageNum, res.totalPages, hrefFor)}`;
+    bindLoadMore({ params, pageNum, totalPages: res.totalPages });
   } catch (e) {
     app.innerHTML = `<div class="pagehead"><h1>Lỗi tải dữ liệu</h1><p>${esc(e.message)}</p></div>`;
   }
@@ -1011,6 +1056,46 @@ function retryDead(slug) {
   writeDead(d);
 }
 
+/* thanh điều khiển riêng: tốc độ / phụ đề / PiP — chỉ tác dụng với luồng HLS */
+function mountPlayerCtl(video, item) {
+  const host = document.getElementById('playerBox');
+  if (!host) return;
+  host.querySelector('.pctl')?.remove();
+  const bar = document.createElement('div');
+  bar.className = 'pctl';
+  bar.innerHTML = `
+    <label>Tốc độ
+      <select data-ctl="speed">${[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}"${v === 1 ? ' selected' : ''}>${v}×</option>`).join('')}</select>
+    </label>
+    ${item && item.sub ? `<label>Phụ đề
+      <select data-ctl="sub"><option value="off">Tắt</option><option value="on">Vietsub</option></select>
+    </label>` : ''}
+    <button type="button" data-ctl="pip">Ảnh trong ảnh</button>
+    ${video ? '' : '<small class="pctl__hint">Nguồn nhúng — tốc độ/phụ đề do player bên kia quản lý</small>'}`;
+  host.appendChild(bar);
+  if (!video) return;
+
+  const speed = bar.querySelector('[data-ctl="speed"]');
+  speed.addEventListener('change', () => {
+    try { video.playbackRate = Number(speed.value); } catch {}
+  });
+
+  const pip = bar.querySelector('[data-ctl="pip"]');
+  if (!document.pictureInPictureEnabled) pip.remove();
+  else pip.addEventListener('click', async () => {
+    try {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture();
+      else await video.requestPictureInPicture();
+    } catch {}
+  });
+
+  const sub = bar.querySelector('[data-ctl="sub"]');
+  if (sub) sub.addEventListener('change', () => {
+    const t = video.textTracks && video.textTracks[0];
+    if (t) t.mode = sub.value === 'on' ? 'showing' : 'hidden';
+  });
+}
+
 let hlsPromise;
 function loadHls() {
   if (window.Hls) return Promise.resolve(window.Hls);
@@ -1152,15 +1237,33 @@ function mountEpisodes(movie, servers, state) {
       if (!hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(innerUrl(src)))}</b> không phát được — đã chuyển nguồn khác.`)) {
         showDead(src, 'không còn nguồn thay thế');
       }
-    } else if (item.m3u8 && !item.embed) {
+    } else if (item.m3u8) {
       playerBox.innerHTML = `<video class="player__video" controls playsinline preload="metadata"></video>`;
-      attachHls(playerBox.querySelector('video'), item.m3u8, () => {
-        markDead(item.m3u8);
+      const vid = playerBox.querySelector('video');
+      if (item.sub) {
+        const tr = document.createElement('track');
+        tr.kind = 'subtitles';
+        tr.label = 'Vietsub';
+        tr.srclang = 'vi';
+        tr.src = item.sub;
+        vid.appendChild(tr);
+      }
+      mountPlayerCtl(vid, item);
+      attachHls(vid, item.m3u8, () => {
+        /* phát trực tiếp lỗi → thử player nhúng, rồi mới nhảy nguồn */
         const wrap = 'https://player.phimapi.com/player/?url=' + encodeURIComponent(item.m3u8);
-        if (isDead(wrap) || !hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> lỗi — đã chuyển nguồn khác.`)) showDead(item.m3u8);
+        if (!isDead(wrap)) {
+          playerBox.innerHTML = `<iframe src="${esc(wrap)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
+          mountPlayerCtl(null, item);
+          notice('Không phát trực tiếp được — đã chuyển sang player nhúng.');
+          return;
+        }
+        markDead(item.m3u8);
+        hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> lỗi — đã chuyển nguồn khác.`);
       }, () => markAlive(item.m3u8));
     } else {
       playerBox.innerHTML = `<iframe src="${esc(src)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
+      mountPlayerCtl(null, item);
       markAlive(src);
       notice('');
     }

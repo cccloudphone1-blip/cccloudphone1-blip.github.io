@@ -23,12 +23,14 @@ Không cần `npm install`. `serve.js` là static server 0-dependency, có fallb
 - 27.400+ phim, 600.000+ tập từ Supabase (REST + publishable key)
 - Trang chủ: hero slider, Top 10 đánh giá cao, Xem tiếp, tabs quốc gia, phim mới / bộ / lẻ / hoạt hình / Việt Nam / chiếu rạp / có trailer
 - Danh sách, thể loại (34), quốc gia (31), landing SEO (~70), tìm kiếm, lọc nâng cao (sort theo mới nhất / điểm / **lượt xem** / tên)
+- Nút **"Tải thêm"** + tự nạp khi cuộn tới cuối ở mọi trang danh sách
 - Chi tiết phim, diễn viên, lịch phát sóng, sitemap
 - **Blog thật**: 114 bài giới thiệu/đánh giá phim lấy từ bảng `movie_reviews`, phân trang, JSON-LD `Article`; mỗi bài tự gắn khối "Giới thiệu phim" trong trang chi tiết
 - Chip **IMDb** (2.500+ phim), **ngày chiếu rạp**, thông báo phim, lượt xem
 
 **Player**
-- 3 tầng: iframe embed → HLS native (hls.js) → iframe wrapper
+- Ưu tiên phát **m3u8 trực tiếp** bằng hls.js (không quảng cáo, có thanh điều khiển riêng: tốc độ 0.5×–2×, phụ đề, ảnh trong ảnh); lỗi thì tự rơi về iframe wrapper rồi mới nhảy nguồn
+- 3 tầng dự phòng: HLS native → iframe wrapper (`player.phimapi.com`) → iframe embed gốc
 - Gộp `movie_episodes` + bảng `streams` (priority / playback_score / health_status)
 - Tự phát hiện nguồn chết: host trả 404 hoặc chặn nhúng (`X-Frame-Options`, `frame-ancestors`) → tự nhảy server khác, **giữ đúng số tập**
 - Tập / server lỗi được đánh dấu ⚠, có nút "Thử nguồn khác" và "Thử lại tất cả"
