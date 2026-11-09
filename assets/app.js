@@ -333,6 +333,51 @@ const loading = (msg = 'Đang tải...') => `<div class="boot"><div class="boot_
 const emptyBox = (msg, extra = '') => `<div class="empty">${esc(msg)}${extra}</div>`;
 const crumbs = parts => `<nav class="crumbs">${parts.map((p, i) => (i ? '<span>/</span>' : '') + (p.href ? `<a href="${p.href}">${esc(p.text)}</a>` : `<b>${esc(p.text)}</b>`)).join('')}</nav>`;
 
+/* ---------------- trailer modal ---------------- */
+function trailerEmbed(url) {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  let id = '';
+  let m = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{6,})/.exec(u);
+  if (m) id = m[1];
+  if (id) return `https://www.youtube.com/embed/${id}?autoplay=1&rel=0&modestbranding=1`;
+  m = /vimeo\.com\/(\d+)/.exec(u);
+  if (m) return `https://player.vimeo.com/video/${m[1]}?autoplay=1`;
+  return '';
+}
+
+function openTrailer(url) {
+  const src = trailerEmbed(url);
+  if (!src) { window.open(url, '_blank', 'noopener'); return; }
+  let box = document.getElementById('trailerModal');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'trailerModal';
+    box.className = 'modal';
+    document.body.appendChild(box);
+  }
+  box.innerHTML = `<div class="modal__bg" data-close></div>
+    <div class="modal__frame">
+      <button class="modal__x" type="button" data-close aria-label="Đóng">×</button>
+      <div class="modal__box"><iframe src="${esc(src)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
+    </div>`;
+  box.hidden = false;
+  document.body.style.overflow = 'hidden';
+  const close = () => {
+    box.hidden = true;
+    box.innerHTML = '';
+    document.body.style.overflow = '';
+  };
+  box.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', close));
+  box._close = close;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const box = document.getElementById('trailerModal');
+  if (box && !box.hidden && box._close) box._close();
+});
+
 /* ---------------- hero ---------------- */
 function heroSlide(m, i) {
   const cats = (m.category || []).slice(0, 3).map(c => esc(c.name)).join(' · ');
@@ -771,8 +816,10 @@ async function renderDetail(slug) {
         <button class="more" id="moreBtn" type="button">Xem thêm</button>
         ${m.notify ? `<div class="notice-inline">🔔 ${esc(String(m.notify).slice(0, 200))}</div>` : ''}
         <div class="btnrow">
-          ${m.trailer_url ? `<a class="btn btn--ghost" href="${esc(m.trailer_url)}" target="_blank" rel="noopener">Trailer</a>` : ''}
+          ${m.trailer_url ? `<button class="btn btn--ghost" type="button" id="trailerBtn" data-url="${esc(m.trailer_url)}">▶ Trailer</button>` : ''}
           ${totalEp ? `<a class="btn btn--ghost" href="/xem-phim/${esc(m.slug)}">Xem tập mới nhất</a>` : ''}
+          <button class="btn btn--ghost" type="button" id="shareBtn" data-url="${esc(SITE() + '/phim/' + m.slug)}" data-title="${esc(m.name)}">Chia sẻ</button>
+          <a class="btn btn--ghost" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(SITE() + '/phim/' + m.slug)}" target="_blank" rel="noopener">Facebook</a>
         </div>
         ${(m.actor || []).length ? `<div class="actors"><b>Diễn viên:</b> ${m.actor.slice(0, 12).map(a => `<a href="/dien-vien?name=${encodeURIComponent(a)}">${esc(a)}</a>`).join(', ')}</div>` : ''}
         ${(m.director || []).length ? `<div class="actors"><b>Đạo diễn:</b> ${m.director.map(a => `<a href="/dien-vien?name=${encodeURIComponent(a)}">${esc(a)}</a>`).join(', ')}</div>` : ''}
@@ -799,6 +846,20 @@ async function renderDetail(slug) {
   });
   const fb = document.querySelector('.favBtn');
   if (fb) bindFav(fb, m);
+
+  document.getElementById('trailerBtn')?.addEventListener('click', e => openTrailer(e.currentTarget.dataset.url));
+  document.getElementById('shareBtn')?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const url = btn.dataset.url;
+    try {
+      if (navigator.share) { await navigator.share({ title: btn.dataset.title, url }); return; }
+      await navigator.clipboard.writeText(url);
+      btn.textContent = 'Đã copy link';
+      setTimeout(() => { btn.textContent = 'Chia sẻ'; }, 1600);
+    } catch {
+      window.prompt('Copy link phim:', url);
+    }
+  });
 
   renderReviews(m);
   loadStory(m);
@@ -1682,6 +1743,16 @@ function bindHeader() {
   });
   input.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; }, 180));
   document.addEventListener('click', e => { if (!form.contains(e.target)) sug.hidden = true; });
+
+  /* "/" để focus ô tìm kiếm */
+  document.addEventListener('keydown', e => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (/^(input|textarea|select)$/i.test(t.tagName) || t.isContentEditable)) return;
+    e.preventDefault();
+    input.focus();
+    input.select();
+  });
 
   const nav = document.getElementById('nav');
   addEventListener('scroll', () => nav.classList.toggle('is-solid', scrollY > 12), { passive: true });

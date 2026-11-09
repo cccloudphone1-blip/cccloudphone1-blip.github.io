@@ -38,6 +38,7 @@ Không cần `npm install`. `serve.js` là static server 0-dependency, có fallb
 - SEO: title/description/canonical/OG/Twitter + JSON-LD (WebSite, ItemList, Movie, TVSeries, BreadcrumbList), `robots.txt`, `sitemap.xml`, noindex cho trang riêng tư
 - PWA: `sw.js` cache app shell, `site.webmanifest`
 - Yêu thích / lịch sử xem / xem tiếp: localStorage
+- Trailer xem trong modal (YouTube/Vimeo, tự chuyển link watch → embed), chia sẻ link phim, phím `/` focus ô tìm kiếm
 - Admin local (`/admin/overview`): PIN, thêm-sửa-xoá phim tay, review, SEO override, banner, chẩn đoán, backup JSON — tất cả trong `localStorage`, không ghi lên Supabase
 
 ---
