@@ -1,0 +1,13 @@
+﻿{
+  "name": "khophim-clone",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Clone giao dien + chuc nang khophim.org bang HTML/CSS/JS thuan",
+  "scripts": {
+    "start": "node serve.js 5173",
+    "serve": "node serve.js 5173",
+    "sitemap": "node gen-sitemap.js http://localhost:5173 6000"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}

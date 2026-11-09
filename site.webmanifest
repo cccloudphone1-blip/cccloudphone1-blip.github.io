@@ -1,0 +1,12 @@
+{
+  "name": "KhoPhim",
+  "short_name": "KhoPhim",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080a10",
+  "theme_color": "#080a10",
+  "icons": [
+    { "src": "/brand/khophim-favicon-v2-96.png", "sizes": "96x96", "type": "image/png" },
+    { "src": "/brand/khophim-apple-touch-v2.png", "sizes": "180x180", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

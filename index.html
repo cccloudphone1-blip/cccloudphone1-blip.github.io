@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KhoPhim – Xem phim online Vietsub, thuyết minh</title>
+<meta name="description" content="KhoPhim – kho phim bộ, phim lẻ, hoạt hình, chiếu rạp Vietsub chất lượng cao. Cập nhật phim mới mỗi ngày.">
+<meta name="theme-color" content="#080a10">
+<link rel="icon" type="image/png" sizes="48x48" href="/brand/khophim-favicon-v2-48.png">
+<link rel="icon" type="image/png" sizes="96x96" href="/brand/khophim-favicon-v2-96.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/brand/khophim-apple-touch-v2.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preconnect" href="https://phimapi.com">
+<link rel="preconnect" href="https://phimimg.com">
+<link rel="preconnect" href="https://ceoxbhsdodllziyxmbqr.supabase.co">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<header class="nav" id="nav">
+  <div class="nav__inner">
+    <a class="brand" href="/">
+      <img class="brand__logo" src="/brand/khophim-logo-v2.png" alt="KhoPhim">
+      <span class="brand__text">Kho<strong>Phim</strong></span>
+    </a>
+
+    <nav class="menu" id="menu">
+      <a href="/danh-sach/phim-moi-cap-nhat">Phim mới</a>
+      <a href="/danh-sach/phim-bo">Phim bộ</a>
+      <a href="/danh-sach/phim-le">Phim lẻ</a>
+      <a href="/danh-sach/hoat-hinh">Hoạt hình</a>
+      <a href="/danh-sach/phim-chieu-rap">Chiếu rạp</a>
+      <a href="/phim">Kho phim</a>
+      <div class="menu__drop" data-drop="the-loai"><button type="button">Thể loại</button><div class="drop"></div></div>
+      <div class="menu__drop" data-drop="quoc-gia"><button type="button">Quốc gia</button><div class="drop"></div></div>
+      <a href="/loc-phim">Lọc</a>
+      <a href="/yeu-thich">Yêu thích</a>
+      <a href="/lich-su">Lịch sử</a>
+    </nav>
+
+    <form class="search" id="searchForm" autocomplete="off">
+      <input id="searchInput" type="search" placeholder="Tìm phim, diễn viên..." aria-label="Tìm phim">
+      <button type="submit" aria-label="Tìm">Tìm</button>
+      <div class="suggest" id="suggest" hidden></div>
+    </form>
+
+    <button class="nav__burger" id="burger" aria-label="Menu">≡</button>
+  </div>
+</header>
+
+<div id="kp-banner" class="strip" hidden></div>
+
+<main id="app">
+  <div class="boot"><div class="boot__spin"></div><p>Đang tải rạp phim...</p></div>
+</main>
+
+<footer class="foot">
+  <div class="foot__inner">
+    <div>
+      <div class="brand brand--foot"><span class="brand__mark">KP</span><span class="brand__text">Kho<strong>Phim</strong></span></div>
+      <p>Xem phim online Vietsub, thuyết minh chất lượng cao. Nguồn dữ liệu: Supabase public catalog của khophim.org (bảng <code>movies</code>, <code>movie_episodes</code>).</p>
+    </div>
+    <div class="foot__cols">
+      <div>
+        <h4>Danh mục</h4>
+        <a href="/danh-sach/phim-bo">Phim bộ</a>
+        <a href="/danh-sach/phim-le">Phim lẻ</a>
+        <a href="/danh-sach/hoat-hinh">Hoạt hình</a>
+        <a href="/danh-sach/phim-chieu-rap">Phim chiếu rạp</a>
+      </div>
+      <div>
+        <h4>Quốc gia</h4>
+        <a href="/quoc-gia/viet-nam">Việt Nam</a>
+        <a href="/quoc-gia/han-quoc">Hàn Quốc</a>
+        <a href="/quoc-gia/trung-quoc">Trung Quốc</a>
+        <a href="/quoc-gia/au-my">Âu Mỹ</a>
+      </div>
+      <div>
+        <h4>Thể loại</h4>
+        <a href="/the-loai/hanh-dong">Hành động</a>
+        <a href="/the-loai/kinh-di">Kinh dị</a>
+        <a href="/the-loai/tinh-cam">Tình cảm</a>
+        <a href="/the-loai/hoat-hinh">Hoạt hình</a>
+      </div>
+      <div>
+        <h4>Khác</h4>
+        <a href="/blog">Blog</a>
+        <a href="/dien-vien">Diễn viên</a>
+        <a href="/lich-cua-toi">Lịch của tôi</a>
+        <a href="/yeu-cau-phim">Yêu cầu phim</a>
+        <a href="/sitemap">Sơ đồ trang</a>
+        <a href="/about">Giới thiệu</a>
+        <a href="/policy">Chính sách</a>
+        <a href="/admin/overview">Admin</a>
+      </div>
+    </div>
+  </div>
+  <div class="foot__bar">KhoPhim — bản clone giao diện, dựng bằng HTML/CSS/JS thuần.</div>
+</footer>
+
+<script type="module" src="/assets/app.js"></script>
+</body>
+</html>

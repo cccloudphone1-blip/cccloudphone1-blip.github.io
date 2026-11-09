@@ -1,0 +1,95 @@
+# KhoPhim Clone
+
+Bản clone giao diện + chức năng của `khophim.org`, viết bằng **HTML/CSS/JS thuần** — không build tool, không dependency, không framework.
+
+Dữ liệu lấy trực tiếp từ Supabase public catalog của site gốc (publishable key, chỉ đọc).
+
+---
+
+## Chạy local
+
+```bash
+node serve.js 5173
+# mở http://localhost:5173
+```
+
+Không cần `npm install`. `serve.js` là static server 0-dependency, có fallback SPA (mọi route lạ trả `index.html`).
+
+---
+
+## Tính năng
+
+**Đọc dữ liệu**
+- 27.400+ phim, 600.000+ tập từ Supabase (REST + publishable key)
+- Trang chủ: hero slider, Top 10 đánh giá cao, Xem tiếp, tabs quốc gia, phim mới / bộ / lẻ / hoạt hình / Việt Nam / chiếu rạp / có trailer
+- Danh sách, thể loại (34), quốc gia (31), landing SEO (~70), tìm kiếm, lọc nâng cao
+- Chi tiết phim, diễn viên, blog, lịch phát sóng, sitemap
+
+**Player**
+- 3 tầng: iframe embed → HLS native (hls.js) → iframe wrapper
+- Gộp `movie_episodes` + bảng `streams` (priority / playback_score / health_status)
+- Tự phát hiện nguồn chết: host trả 404 hoặc chặn nhúng (`X-Frame-Options`, `frame-ancestors`) → tự nhảy server khác, **giữ đúng số tập**
+- Tập / server lỗi được đánh dấu ⚠, có nút "Thử nguồn khác" và "Thử lại tất cả"
+
+**Khác**
+- SEO: title/description/canonical/OG/Twitter + JSON-LD (WebSite, ItemList, Movie, TVSeries, BreadcrumbList), `robots.txt`, `sitemap.xml`, noindex cho trang riêng tư
+- PWA: `sw.js` cache app shell, `site.webmanifest`
+- Yêu thích / lịch sử xem / xem tiếp: localStorage
+- Admin local (`/admin/overview`): PIN, thêm-sửa-xoá phim tay, review, SEO override, banner, chẩn đoán, backup JSON — tất cả trong `localStorage`, không ghi lên Supabase
+
+---
+
+## Cấu trúc
+
+```
+index.html            # shell: nav, footer, banner slot
+assets/app.js         # router, Supabase client, card/hero/detail/watch/list, player, SEO
+assets/admin.js       # admin panel + overlay dữ liệu local
+assets/style.css      # design tokens + component
+brand/                # logo, favicon, icon PWA   ← brand của khophim.org, xem mục Bản quyền
+sw.js                 # service worker
+serve.js              # static server (dev + self-host)
+gen-sitemap.js        # sinh sitemap.xml từ Supabase
+robots.txt / sitemap.xml / site.webmanifest
+```
+
+Router dùng `pushState`. Thêm route mới: sửa `route()` trong `assets/app.js`.
+
+---
+
+## Deploy
+
+Yêu cầu duy nhất: **host tĩnh có SPA fallback** (mọi path → `index.html`).
+
+| Host | Cách làm |
+|---|---|
+| Netlify | Kéo repo vào, đã có `_redirects` + `netlify.toml`. Publish dir: `.` |
+| Vercel | `vercel deploy`, đã có `vercel.json` |
+| Cloudflare Pages | Framework preset: None, build command: trống, output: `/` (đã có `_redirects`) |
+| VPS / máy riêng | `node serve.js 80` sau reverse proxy (nginx/caddy) |
+| GitHub Pages | Chạy được nhưng **không có SPA fallback** → deep link sẽ 404. Phải dùng `404.html` = copy của `index.html` |
+
+Sau khi có domain, sinh lại sitemap:
+
+```bash
+node gen-sitemap.js https://domain-cua-ban.com 6000
+```
+
+---
+
+## Giới hạn đã biết
+
+- **Chỉ đọc** dữ liệu gốc. Muốn ghi (thêm phim, review, banner cho mọi người thấy) thì cần backend riêng — hiện admin chỉ lưu trong `localStorage` của từng trình duyệt.
+- **Không có đăng nhập**: Google OAuth + đồng bộ `user_sync_items` chưa nối.
+- **Không SSR**: bot chỉ nhận HTML shell, không có nội dung render sẵn.
+- **Nguồn phim là CDN bên thứ ba.** Một số CDN (`*.phim1280.tv`, `*.kkphimplayer*.com`, `a.kvp726.com`) chặn IP datacenter / VPN / WARP → trả 404. Nếu xem bằng VPN/WARP, thêm split-tunnel exclude cho các host đó, hoặc dùng mạng dân dụng VN. Player tự nhảy sang nguồn khác khi gặp lỗi.
+- `streamc.xyz`, `dailymotion.com`, `short.icu` chặn nhúng iframe → đã loại khỏi vòng chọn nguồn.
+
+---
+
+## Bản quyền & ghi công
+
+- **Code trong repo này**: MIT (xem `LICENSE`).
+- **Dữ liệu phim, tên/logo/thương hiệu KhoPhim**: thuộc `khophim.org`. Repo này chỉ dùng publishable key công khai của họ để đọc catalog.
+- Nếu deploy công khai, nên **thay bộ nhận diện trong `brand/`** bằng logo của bạn và ghi rõ nguồn dữ liệu, tránh để người dùng nhầm là site chính thức.
+- Không có quảng cáo, không có mã theo dõi của site gốc.
