@@ -45,11 +45,32 @@ async function fetchReviews() {
     process.stdout.write(`  fetched ${offset}\n`);
   }
 
-  const body = [...urls.entries()].map(([loc, lastmod]) =>
+  const body = entries => entries.map(([loc, lastmod]) =>
     `  <url><loc>${loc.replace(/&/g, '&amp;')}</loc>${lastmod ? `<lastmod>${String(lastmod).slice(0, 10)}</lastmod>` : ''}</url>`
   ).join('\n');
 
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>\n`;
-  fs.writeFileSync(__dirname + '/sitemap.xml', xml, 'utf8');
-  console.log('sitemap.xml:', urls.size, 'urls,', Math.round(xml.length / 1024), 'KB');
+  const write = (file, entries) => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body(entries)}\n</urlset>\n`;
+    fs.writeFileSync(__dirname + '/' + file, xml, 'utf8');
+    console.log(`${file}: ${entries.length} urls, ${Math.round(xml.length / 1024)} KB`);
+  };
+
+  const isMovie = loc => /\/phim\/[^/]+$/.test(loc);
+  const isBlog = loc => /\/blog\/[^/]+$/.test(loc);
+
+  const all = [...urls.entries()];
+  const movies = all.filter(([loc]) => isMovie(loc));
+  const blogs = all.filter(([loc]) => isBlog(loc));
+  const rest = all.filter(([loc]) => !isMovie(loc) && !isBlog(loc));
+
+  write('sitemap-movies.xml', movies);
+  write('sitemap-reviews.xml', blogs);
+  write('sitemap-static.xml', rest);
+
+  const index = `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    ['sitemap-movies.xml', 'sitemap-reviews.xml', 'sitemap-static.xml']
+      .map(f => `  <sitemap><loc>${BASE}/${f}</loc><lastmod>${new Date().toISOString().slice(0, 10)}</lastmod></sitemap>`).join('\n') +
+    `\n</sitemapindex>\n`;
+  fs.writeFileSync(__dirname + '/sitemap.xml', index, 'utf8');
+  console.log('sitemap.xml: index 3 file');
 })();

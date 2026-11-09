@@ -1,5 +1,5 @@
-/* Service worker: cache app shell, network-first cho API */
-const SHELL = 'kp-shell-v1';
+/* Service worker: cache app shell, bỏ qua request khác origin */
+const SHELL = 'kp-shell-v2';
 const ASSETS = ['/', '/assets/app.js', '/assets/style.css', '/brand/khophim-logo-v2.png', '/brand/khophim-favicon-v2-96.png', '/site.webmanifest'];
 
 self.addEventListener('install', e => {
@@ -15,10 +15,13 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
-  const url = new URL(req.url);
 
-  // API: network-first, không cache lâu
-  if (/supabase\.co|phimapi\.com|phimimg\.com|player\./.test(url.host)) return;
+  let url;
+  try { url = new URL(req.url); } catch { return; }
+
+  // Chỉ xử lý request cùng origin. Supabase / CDN / player để trình duyệt tự lo
+  // (chèn SW vào request có header Range từng làm response treo).
+  if (url.origin !== location.origin) return;
 
   // điều hướng SPA: network-first, offline trả shell
   if (req.mode === 'navigate') {

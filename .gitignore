@@ -3,7 +3,7 @@ _recon/
 recon2.js
 
 # sitemap sinh tu dong theo domain thuc te (node gen-sitemap.js <base-url>)
-sitemap.xml
+sitemap*.xml
 
 # he dieu hanh / editor
 .DS_Store

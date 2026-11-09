@@ -56,6 +56,7 @@ const COUNTRIES = {
 /* Trang SEO phẳng của site gốc → query tương ứng */
 const LANDINGS = {
   'phim-moi-nhat': { t: 'Phim mới nhất', q: {} },
+  'phim-moi': { t: 'Phim mới', q: {} },
   'phim-moi-cap-nhat': { t: 'Phim mới cập nhật', q: {} },
   'kho-phim': { t: 'Toàn bộ kho phim', q: {} },
   'kho-phim-online': { t: 'Kho phim online', q: {} },
@@ -68,7 +69,9 @@ const LANDINGS = {
   'phim-vietsub': { t: 'Phim Vietsub', q: { lang: 'ilike.*vietsub*' } },
   'xem-phim-moi': { t: 'Xem phim mới', q: {} },
   'phim-thuyet-minh': { t: 'Phim thuyết minh', q: { lang: 'ilike.*thuyết minh*' } },
+  'xem-phim-thuyet-minh': { t: 'Xem phim thuyết minh', q: { lang: 'ilike.*thuyết minh*' } },
   'phim-long-tieng': { t: 'Phim lồng tiếng', q: { lang: 'ilike.*lồng tiếng*' } },
+  'xem-phim-long-tieng': { t: 'Xem phim lồng tiếng', q: { lang: 'ilike.*lồng tiếng*' } },
   'phim-4k': { t: 'Phim 4K', q: { quality: 'ilike.*4K*' } },
   'phim-full-hd': { t: 'Phim Full HD', q: { quality: 'ilike.*HD*' } },
   'phim-hoan-tat': { t: 'Phim hoàn tất', q: { episode_current: 'ilike.*hoàn tất*' } },
@@ -97,6 +100,7 @@ const LANDINGS = {
 };
 for (const [slug, name] of Object.entries(COUNTRIES)) {
   LANDINGS['phim-' + slug] = { t: 'Phim ' + name, q: { country: `cs.[{"slug":"${slug}"}]` }, noindex: false };
+  LANDINGS['xem-phim-' + slug] = { t: 'Xem phim ' + name, q: { country: `cs.[{"slug":"${slug}"}]` }, noindex: false };
 }
 LANDINGS['phim-my'] = { t: 'Phim Mỹ', q: { country: 'cs.[{"slug":"au-my"}]' } };
 LANDINGS['phim-han-quoc'] = { t: 'Phim Hàn Quốc', q: { country: 'cs.[{"slug":"han-quoc"}]' } };
@@ -1545,6 +1549,8 @@ async function renderBlog(slug) {
       setHead({ title: `Không tìm thấy bài viết | ${SITE_NAME}`, description: '', path: '/blog/' + slug, robots: 'noindex, follow' });
       app.innerHTML = `<div class="pagehead">${crumbs([{ text: 'Trang chủ', href: '/' }, { text: 'Blog', href: '/blog' }, { text: 'Không tìm thấy' }])}
         <h1>Không tìm thấy bài viết</h1><a class="btn btn--ghost" href="/blog">Về blog</a></div>`;
+      window.scrollTo(0, 0);
+      return false;
     }
     window.scrollTo(0, 0);
     return;
@@ -1646,6 +1652,8 @@ function route() {
   if (a === 'phim' && b) return renderDetail(b);
   if (a === 'phim') return renderCollection({ title: 'Toàn bộ kho phim', params: {}, base: '/phim', page: params.get('page'), crumbsParts: [{ text: 'Trang chủ', href: '/' }, { text: 'Kho phim' }] });
   if (a === 'xem-phim' && b) return renderWatch(b, params);
+  if (a === 'xem' && b) return go('/xem-phim/' + b + location.search, true);
+  if (a === 'review-phim' && b) return renderBlog(b).then(ok => { if (ok === false) go('/phim/' + b, true); });
   if (a === 'noi-dung-phim' && b) return renderSynopsis(b);
   if (a === 'download-phim' && b) return renderDownload(b);
   if (a === 'danh-sach' && b) return renderList('danh-sach', b, params.get('page'));

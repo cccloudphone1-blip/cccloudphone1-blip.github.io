@@ -59,6 +59,9 @@ robots.txt / sitemap.xml / site.webmanifest
 
 Router dùng `pushState`. Thêm route mới: sửa `route()` trong `assets/app.js`.
 
+Route đã có: `/phim-moi`, `/phim-<quốc-gia>`, `/xem-phim-<quốc-gia>`, `/xem/:slug` (alias của `/xem-phim/:slug`, giữ `?sv=&ep=`), `/review-phim/:slug` (bài review, không có thì về trang phim).
+Sitemap chia 3 file: `sitemap-movies.xml`, `sitemap-reviews.xml`, `sitemap-static.xml` + `sitemap.xml` làm index.
+
 ---
 
 ## Deploy
