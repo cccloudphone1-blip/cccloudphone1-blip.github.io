@@ -1,5 +1,7 @@
 # KhoPhim Clone
 
+**Chạy thử:** https://cracksteam456.github.io/ (bản deploy từ repo này, tự cập nhật mỗi lần push)
+
 Bản clone giao diện + chức năng của `khophim.org`, viết bằng **HTML/CSS/JS thuần** — không build tool, không dependency, không framework.
 
 Dữ liệu lấy trực tiếp từ Supabase public catalog của site gốc (publishable key, chỉ đọc).
@@ -77,7 +79,7 @@ Yêu cầu duy nhất: **host tĩnh có SPA fallback** (mọi path → `index.ht
 | Vercel | `vercel deploy`, đã có `vercel.json` |
 | Cloudflare Pages | Framework preset: None, build command: trống, output: `/` (đã có `_redirects`) |
 | VPS / máy riêng | `node serve.js 80` sau reverse proxy (nginx/caddy) |
-| GitHub Pages | Chạy được nhưng **không có SPA fallback** → deep link sẽ 404. Phải dùng `404.html` = copy của `index.html` |
+| GitHub Pages | ✔ đang dùng: repo `cracksteam456.github.io` (user site → path tuyệt đối chạy đúng). Không có rewrite thật nên deep link trả **HTTP 404** rồi mới render `404.html` — người dùng vẫn vào được, nhưng bot/SEO sẽ thấy 404. Project page dưới `/ten-repo/` thì không dùng được vì path tuyệt đối |
 
 Sau khi có domain, sinh lại sitemap:
 
