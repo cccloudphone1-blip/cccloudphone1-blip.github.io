@@ -3,6 +3,10 @@
 import {
   adminPage, ADMIN_PAGES, localMovies, findLocalMovie, localReviews, addReview,
   seoOverrides, bannerState, saveLocalMovie, deleteLocalMovie, allReviews, setSeoOverride,
+  movieComments, addComment, deleteComment,
+  followedMovies, isFollowed, toggleFollow, updateFollowEp,
+  episodeNotifs, pushEpisodeNotif, markNotifsSeen, unseenNotifCount,
+  playerReports, addPlayerReport,
 } from './admin.js';
 
 const SB = 'https://ceoxbhsdodllziyxmbqr.supabase.co';
@@ -750,6 +754,20 @@ function favButton(m) {
   return `<button class="btn btn--ghost favBtn${on ? ' on' : ''}" type="button" data-slug="${esc(m.slug)}" data-name="${esc(m.name)}" data-poster="${esc(m.poster_url || m.thumb_url || '')}" data-year="${esc(m.year || '')}" data-ep="${esc(m.episode_current || '')}">${on ? '♥ Đã yêu thích' : '♡ Yêu thích'}</button>`;
 }
 
+function followButton(m) {
+  const on = isFollowed(m.slug);
+  return `<button class="btn btn--ghost followBtn${on ? ' on' : ''}" type="button" data-slug="${esc(m.slug)}" data-name="${esc(m.name)}" data-poster="${esc(m.poster_url || m.thumb_url || '')}" data-year="${esc(m.year || '')}" data-ep="${esc(m.episode_current || '')}">${on ? '◉ Đang theo dõi' : '◎ Theo dõi'}</button>`;
+}
+
+function bindFollow(btn, m) {
+  btn.addEventListener('click', () => {
+    const added = toggleFollow(m);
+    btn.classList.toggle('on', added);
+    btn.textContent = added ? '◉ Đang theo dõi' : '◎ Theo dõi';
+    renderNotifStrip();
+  });
+}
+
 function bindFav(btn, m) {
   btn.addEventListener('click', () => {
     const added = toggleFav(m);
@@ -809,7 +827,7 @@ async function renderDetail(slug) {
       <div class="detail__poster">
         <img src="${esc(m.poster_url || m.thumb_url || '')}" alt="${esc(m.name)}" onerror="this.style.visibility='hidden'">
         ${totalEp ? `<a class="btn btn--primary" href="/xem-phim/${esc(m.slug)}">▶ Xem phim</a>` : ''}
-        <div class="detail__acts">${favButton(m)}</div>
+        <div class="detail__acts">${favButton(m)}${followButton(m)}</div>
       </div>
       <div class="detail__body">
         ${crumbs([{ text: 'Trang chủ', href: '/' }, { text: tl.text, href: tl.href }, { text: m.name }])}
@@ -841,6 +859,7 @@ async function renderDetail(slug) {
 
   <section class="section" id="related"></section>
   <section class="section" id="story"></section>
+  <section class="section" id="comments"></section>
   <section class="section" id="reviews"></section>`;
 
   document.getElementById('moreBtn')?.addEventListener('click', e => {
@@ -850,6 +869,8 @@ async function renderDetail(slug) {
   });
   const fb = document.querySelector('.favBtn');
   if (fb) bindFav(fb, m);
+  const fol = document.querySelector('.followBtn');
+  if (fol) bindFollow(fol, m);
 
   document.getElementById('trailerBtn')?.addEventListener('click', e => openTrailer(e.currentTarget.dataset.url));
   document.getElementById('shareBtn')?.addEventListener('click', async e => {
@@ -866,6 +887,7 @@ async function renderDetail(slug) {
   });
 
   renderReviews(m);
+  renderComments(m);
   loadStory(m);
   mountEpisodes(m, servers, { sv: 0, ep: 0, watchPage: false });
   relatedSection(m).then(rows => {
@@ -912,6 +934,7 @@ async function renderWatch(slug, params) {
       <button class="btn btn--ghost" id="nextEp" type="button">Tập sau ›</button>
       <div class="watch__bar__right">
         ${favButton(m)}
+        ${followButton(m)}
         <a class="btn btn--ghost" href="/phim/${esc(m.slug)}">Thông tin phim</a>
       </div>
     </div>
@@ -925,6 +948,8 @@ async function renderWatch(slug, params) {
 
   const fb = document.querySelector('.favBtn');
   if (fb) bindFav(fb, m);
+  const folW = document.querySelector('.followBtn');
+  if (folW) bindFollow(folW, m);
 
   const sv = Math.min(Math.max(parseInt(params.get('sv')) || 0, 0), Math.max(0, servers.length - 1));
   const ep = Math.min(Math.max(parseInt(params.get('ep')) || 0, 0), Math.max(0, (servers[sv]?.eps.length || 1) - 1));
@@ -1083,11 +1108,23 @@ function mountEpisodes(movie, servers, state) {
   const showDead = (src, extra = '') => {
     const hosts = deadHostList();
     playerBox.innerHTML = `<div class="player__err">Nguồn <b>${esc(hostOf(innerUrl(src)) || 'không rõ')}</b> không phát được${extra ? ' — ' + esc(extra) : ''}.<br>
-      <button type="button" class="btn btn--primary" id="tryNext" style="margin-top:12px">Thử nguồn khác</button></div>`;
+      <div class="btnrow" style="justify-content:center">
+        <button type="button" class="btn btn--primary" id="tryNext">Thử nguồn khác</button>
+        <button type="button" class="btn btn--ghost" id="reportSrc">Báo nguồn lỗi</button>
+      </div></div>`;
     document.getElementById('tryNext')?.addEventListener('click', () => {
       const np = seek(cur.sv, cur.ep + 1) || seek(cur.sv + 1, 0);
       if (!np) { notice(`Tất cả nguồn đều lỗi: ${esc(hosts.join(', '))}`); return; }
       cur.sv = np.s; cur.ep = np.e; sync(); render();
+    });
+    document.getElementById('reportSrc')?.addEventListener('click', () => {
+      const s = servers[cur.sv], e = s && s.eps[cur.ep];
+      addPlayerReport({
+        slug: movie.slug, name: movie.name,
+        server: s ? s.name : '', ep: e ? e.name : '',
+        host: hostOf(innerUrl(src)), note: extra || '',
+      });
+      notice('Đã ghi nhận báo lỗi nguồn <b>' + esc(hostOf(innerUrl(src))) + '</b>. Cảm ơn bạn.');
     });
     notice(`Nguồn bị chặn ở khu vực/kết nối này: ${esc(hosts.join(', ') || 'không rõ')} <button type="button" id="retrySrc" class="linkbtn">Thử lại tất cả</button><br><small>Đang bật VPN/WARP (1.1.1.1) hoặc proxy? Tắt đi rồi bấm thử lại — CDN phim chặn IP datacenter.</small>`);
     document.getElementById('retrySrc')?.addEventListener('click', () => { retryDead(movie.slug); render(); });
@@ -1585,6 +1622,105 @@ async function renderBlog(slug) {
   window.scrollTo(0, 0);
 }
 
+/* ---------------- bình luận (local) ---------------- */
+function renderComments(m) {
+  const el = document.getElementById('comments');
+  if (!el) return;
+  const list = movieComments(m.slug);
+  el.innerHTML = `<div class="section__head"><h2>Bình luận (${list.length})</h2><span class="chip">lưu trên máy bạn</span></div>
+    <div class="reviews">
+      <form class="filterform" id="commentForm">
+        <input name="name" placeholder="Tên bạn" maxlength="40">
+        <input name="text" placeholder="Viết bình luận..." maxlength="500" style="min-width:280px" required>
+        <button class="btn btn--primary" type="submit">Gửi</button>
+      </form>
+      <div class="hist" id="commentList">
+        ${list.length ? list.map(c => `<div class="hist__row">
+            <div><b>${esc(c.name)}</b><small>${esc(c.text)} · ${new Date(c.at).toLocaleString('vi-VN')}</small></div>
+            <button class="btn btn--ghost" type="button" data-cid="${esc(c.id)}">Xoá</button>
+          </div>`).join('') : emptyBox('Chưa có bình luận.')}
+      </div>
+    </div>`;
+  document.getElementById('commentForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const f = e.target;
+    const text = f.text.value.trim();
+    if (!text) return;
+    addComment(m.slug, { name: f.name.value.trim(), text });
+    renderComments(m);
+  });
+  el.querySelectorAll('[data-cid]').forEach(b => b.addEventListener('click', () => {
+    deleteComment(m.slug, b.dataset.cid);
+    renderComments(m);
+  }));
+}
+
+/* ---------------- thông báo tập mới cho phim đang theo dõi ---------------- */
+function renderNotifStrip() {
+  const host = document.getElementById('kp-notif');
+  if (!host) return;
+  const n = unseenNotifCount();
+  if (!n) { host.hidden = true; host.innerHTML = ''; return; }
+  host.hidden = false;
+  host.innerHTML = `<div class="strip__in"><a href="/theo-doi">🔔 ${n} phim bạn theo dõi vừa có tập mới</a>
+    <button type="button" aria-label="Đánh dấu đã xem">×</button></div>`;
+  host.querySelector('button').addEventListener('click', () => { markNotifsSeen(); renderNotifStrip(); });
+}
+
+async function checkFollowedEpisodes() {
+  const list = followedMovies();
+  if (!list.length) return;
+  const slugs = list.slice(0, 60).map(f => f.slug);
+  try {
+    const { rows } = await api('movies', {
+      select: 'slug,name,episode_current', is_published: 'eq.true', slug: `in.(${slugs.join(',')})`,
+    });
+    for (const m of rows) {
+      const f = list.find(x => x.slug === m.slug);
+      if (!f) continue;
+      const now = m.episode_current || '';
+      if (f.ep && now && now !== f.ep) {
+        pushEpisodeNotif({ slug: m.slug, name: m.name, ep: now });
+        updateFollowEp(m.slug, now);
+      } else if (!f.ep && now) updateFollowEp(m.slug, now);
+    }
+  } catch {}
+  renderNotifStrip();
+}
+
+/* ---------------- trang theo dõi ---------------- */
+function renderFollowPage() {
+  setHead({
+    title: `Phim đang theo dõi | ${SITE_NAME}`,
+    description: 'Danh sách phim bạn theo dõi và thông báo tập mới.',
+    path: '/theo-doi',
+    robots: 'noindex, follow',
+  });
+  const list = followedMovies();
+  const notifs = episodeNotifs();
+  app.innerHTML = `<div class="pagehead">${crumbs([{ text: 'Trang chủ', href: '/' }, { text: 'Theo dõi' }])}
+      <h1>Phim đang theo dõi</h1>
+      <p class="count">${list.length} phim · ${notifs.length} thông báo</p>
+      ${notifs.length ? `<div class="btnrow"><button class="btn btn--ghost" type="button" id="markSeen">Đánh dấu đã xem tất cả</button></div>` : ''}
+    </div>
+    <section class="section">
+      ${list.length ? `<div class="grid">${list.map(f => `<a class="card" href="/xem-phim/${esc(f.slug)}">
+        <div class="card__img"><img src="${esc(f.poster)}" alt="${esc(f.name)}" loading="lazy" onerror="this.classList.add('ph')">
+          <span class="card__ep">${esc(f.ep || '')}</span></div>
+        <div class="card__name">${esc(f.name)}</div>
+        <div class="card__sub">${esc(f.year || '')}</div></a>`).join('')}</div>` : emptyBox('Chưa theo dõi phim nào. Bấm "Theo dõi" ở trang phim.')}
+    </section>
+    <section class="section">
+      <div class="section__head"><h2>Thông báo tập mới</h2></div>
+      ${notifs.length ? `<div class="hist">${notifs.map(n => `<a class="hist__row" href="/phim/${esc(n.slug)}">
+        <div><b>${esc(n.name)}</b><small>${esc(n.ep)} · ${new Date(n.at).toLocaleString('vi-VN')}${n.seen ? '' : ' · mới'}</small></div>
+        <span class="chip chip--red">Mở</span></a>`).join('')}</div>` : emptyBox('Chưa có thông báo.')}
+    </section>`;
+  document.getElementById('markSeen')?.addEventListener('click', () => { markNotifsSeen(); renderFollowPage(); });
+  renderNotifStrip();
+  window.scrollTo(0, 0);
+}
+
 /* ---------------- reviews (local) ---------------- */
 function renderReviews(m) {
   const el = document.getElementById('reviews');
@@ -1638,6 +1774,7 @@ function renderBanner() {
 /* ---------------- router ---------------- */
 function route() {
   renderBanner();
+  renderNotifStrip();
   const params = new URLSearchParams(location.search);
   const seg = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   const [a, b] = seg;
@@ -1666,6 +1803,7 @@ function route() {
   if (a === 'dien-vien' && b) return renderActorSlug(b);
   if (a === 'dien-vien') return renderActors(params);
   if (a === 'yeu-thich') return renderFavorites();
+  if (a === 'theo-doi' || a === 'thong-bao') return renderFollowPage();
   if (a === 'lich-su') return renderHistory();
   if (a === 'blog') return renderBlog(b);
   if (a === 'admin') return adminCtx(b || 'overview');
@@ -1770,6 +1908,9 @@ bindHeader();
 buildMenus();
 addEventListener('popstate', route);
 route();
+
+/* kiểm tra tập mới của phim đang theo dõi (một lần mỗi phiên) */
+if (followedMovies().length) setTimeout(() => { checkFollowedEpisodes(); }, 1200);
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

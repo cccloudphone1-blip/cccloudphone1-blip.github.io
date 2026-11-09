@@ -7,6 +7,10 @@ const K = {
   REVIEWS: 'kp_local_reviews',
   SEO: 'kp_seo_overrides',
   BANNER: 'kp_banner',
+  COMMENTS: 'khophim_comments',
+  FOLLOW: 'kp_followed_movies',
+  NOTIFS: 'kp_episode_notifications',
+  REPORTS: 'kp_player_reports',
 };
 
 const read = (k, def) => { try { const v = JSON.parse(localStorage.getItem(k)); return v === null ? def : v; } catch { return def; } };
@@ -57,6 +61,66 @@ export function setSeoOverride(path, title, description) {
 }
 export const bannerState = () => read(K.BANNER, { active: false, text: '', link: '' });
 
+/* ---------------- bình luận (local, giống gốc: khophim_comments_<slug>) ---------------- */
+export const movieComments = slug => read(K.COMMENTS, {})[slug] || [];
+export function addComment(slug, c) {
+  const all = read(K.COMMENTS, {});
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  all[slug] = [{ id, name: c.name || 'Khách', text: c.text, at: Date.now(), replyTo: c.replyTo || null }, ...(all[slug] || [])].slice(0, 200);
+  write(K.COMMENTS, all);
+  return id;
+}
+export function deleteComment(slug, id) {
+  const all = read(K.COMMENTS, {});
+  all[slug] = (all[slug] || []).filter(c => c.id !== id);
+  if (!all[slug].length) delete all[slug];
+  write(K.COMMENTS, all);
+}
+export const allComments = () => read(K.COMMENTS, {});
+
+/* ---------------- theo dõi phim + thông báo tập mới (local) ---------------- */
+export const followedMovies = () => read(K.FOLLOW, []);
+export const isFollowed = slug => followedMovies().some(f => f.slug === slug);
+export function toggleFollow(movie) {
+  const list = followedMovies();
+  const hit = list.findIndex(f => f.slug === movie.slug);
+  if (hit >= 0) { list.splice(hit, 1); write(K.FOLLOW, list); return false; }
+  list.unshift({
+    slug: movie.slug, name: movie.name, poster: movie.poster_url || movie.thumb_url || '',
+    year: movie.year || '', ep: movie.episode_current || '', at: Date.now(),
+  });
+  write(K.FOLLOW, list.slice(0, 200));
+  return true;
+}
+export function updateFollowEp(slug, ep) {
+  const list = followedMovies();
+  const f = list.find(x => x.slug === slug);
+  if (!f || f.ep === ep) return null;
+  const prev = f.ep;
+  f.ep = ep;
+  write(K.FOLLOW, list);
+  return prev;
+}
+
+export const episodeNotifs = () => read(K.NOTIFS, []);
+export function pushEpisodeNotif(n) {
+  const list = episodeNotifs().filter(x => !(x.slug === n.slug && x.ep === n.ep));
+  list.unshift({ ...n, at: Date.now(), seen: false });
+  write(K.NOTIFS, list.slice(0, 100));
+}
+export function markNotifsSeen() {
+  write(K.NOTIFS, episodeNotifs().map(n => ({ ...n, seen: true })));
+}
+export const unseenNotifCount = () => episodeNotifs().filter(n => !n.seen).length;
+
+/* ---------------- báo lỗi nguồn phát ---------------- */
+export const playerReports = () => read(K.REPORTS, []);
+export function addPlayerReport(r) {
+  const list = playerReports();
+  list.unshift({ ...r, at: Date.now() });
+  write(K.REPORTS, list.slice(0, 200));
+}
+
 /* ---------------- auth ---------------- */
 const pinSet = () => !!read(K.PIN, '');
 const sessionValid = () => {
@@ -72,6 +136,7 @@ const endSession = () => { sessionStorage.removeItem(K.TOKEN); sessionStorage.re
 
 export const ADMIN_PAGES = {
   overview: 'Tổng quan', movies: 'Quản lý phim', 'add-movie': 'Thêm phim', reviews: 'Review',
+  comments: 'Bình luận', reports: 'Nguồn lỗi', follow: 'Theo dõi',
   seo: 'SEO', banner: 'Banner', 'content-health': 'Sức khoẻ nội dung', 'sync-health': 'Đồng bộ',
   ping: 'Chẩn đoán', settings: 'Cài đặt',
 };
@@ -264,6 +329,61 @@ export function adminPage(ctx) {
         all2[b.dataset.rslug].splice(Number(b.dataset.ri), 1);
         if (!all2[b.dataset.rslug].length) delete all2[b.dataset.rslug];
         write(K.REVIEWS, all2);
+        adminPage(ctx);
+      }));
+      break;
+    }
+
+    case 'comments': {
+      const all = allComments();
+      const total = Object.values(all).flat().length;
+      shell(total
+        ? `<div class="admin-card"><h2>Bình luận (${total})</h2><div class="hist">${Object.entries(all).map(([slug, arr]) => arr.map(c => `<div class="hist__row">
+            <div><b>${esc(c.name)}</b><small>${esc(slug)} · ${esc(c.text)} · ${new Date(c.at).toLocaleString('vi-VN')}</small></div>
+            <a class="btn btn--ghost" href="/phim/${esc(slug)}">Xem</a>
+            <button class="btn btn--ghost" type="button" data-cslug="${esc(slug)}" data-cid="${esc(c.id)}">Xoá</button>
+          </div>`).join('')).join('')}</div></div>`
+        : emptyBox('Chưa có bình luận. Người xem gửi ở trang chi tiết phim.'));
+      body().querySelectorAll('[data-cslug]').forEach(b => b.addEventListener('click', () => {
+        deleteComment(b.dataset.cslug, b.dataset.cid);
+        adminPage(ctx);
+      }));
+      break;
+    }
+
+    case 'reports': {
+      const list = playerReports();
+      shell(list.length
+        ? `<div class="admin-card"><h2>Báo lỗi nguồn phát (${list.length})</h2><div class="hist">${list.map(r => `<div class="hist__row">
+            <div><b>${esc(r.name || r.slug)} · ${esc(r.server || '')} · ${esc(r.ep || '')}</b><small>${esc(r.host || '')} · ${esc(r.note || 'người xem báo không phát được')} · ${new Date(r.at).toLocaleString('vi-VN')}</small></div>
+            <a class="btn btn--ghost" href="/xem-phim/${esc(r.slug)}">Mở</a>
+            <button class="btn btn--ghost" type="button" data-delrep="${r.at}">Xoá</button>
+          </div>`).join('')}</div></div>`
+        : emptyBox('Chưa có báo lỗi nào.'));
+      body().querySelectorAll('[data-delrep]').forEach(b => b.addEventListener('click', () => {
+        write(K.REPORTS, playerReports().filter(r => String(r.at) !== b.dataset.delrep));
+        adminPage(ctx);
+      }));
+      break;
+    }
+
+    case 'follow': {
+      const list = followedMovies();
+      const notifs = episodeNotifs();
+      shell(`<div class="admin-card"><h2>Phim đang theo dõi (${list.length})</h2>
+        ${list.length ? `<div class="hist">${list.map(f => `<div class="hist__row">
+            <img src="${esc(f.poster)}" alt="" onerror="this.style.visibility='hidden'">
+            <div><b>${esc(f.name)}</b><small>${esc(f.slug)} · tập ghi nhớ: ${esc(f.ep || '—')}</small></div>
+            <a class="btn btn--ghost" href="/phim/${esc(f.slug)}">Mở</a>
+            <button class="btn btn--ghost" type="button" data-unfollow="${esc(f.slug)}">Bỏ theo dõi</button>
+          </div>`).join('')}</div>` : emptyBox('Chưa theo dõi phim nào.')}</div>
+        <div class="admin-card"><h2>Thông báo tập mới (${notifs.length})</h2>
+        ${notifs.length ? `<div class="hist">${notifs.map(n => `<div class="hist__row">
+            <div><b>${esc(n.name)}</b><small>${esc(n.ep)} · ${new Date(n.at).toLocaleString('vi-VN')}</small></div>
+            <a class="btn btn--ghost" href="/phim/${esc(n.slug)}">Mở</a>
+          </div>`).join('')}</div>` : emptyBox('Chưa có thông báo.')}</div>`);
+      body().querySelectorAll('[data-unfollow]').forEach(b => b.addEventListener('click', () => {
+        toggleFollow({ slug: b.dataset.unfollow, name: '' });
         adminPage(ctx);
       }));
       break;
