@@ -22,14 +22,17 @@ Không cần `npm install`. `serve.js` là static server 0-dependency, có fallb
 **Đọc dữ liệu**
 - 27.400+ phim, 600.000+ tập từ Supabase (REST + publishable key)
 - Trang chủ: hero slider, Top 10 đánh giá cao, Xem tiếp, tabs quốc gia, phim mới / bộ / lẻ / hoạt hình / Việt Nam / chiếu rạp / có trailer
-- Danh sách, thể loại (34), quốc gia (31), landing SEO (~70), tìm kiếm, lọc nâng cao
-- Chi tiết phim, diễn viên, blog, lịch phát sóng, sitemap
+- Danh sách, thể loại (34), quốc gia (31), landing SEO (~70), tìm kiếm, lọc nâng cao (sort theo mới nhất / điểm / **lượt xem** / tên)
+- Chi tiết phim, diễn viên, lịch phát sóng, sitemap
+- **Blog thật**: 114 bài giới thiệu/đánh giá phim lấy từ bảng `movie_reviews`, phân trang, JSON-LD `Article`; mỗi bài tự gắn khối "Giới thiệu phim" trong trang chi tiết
+- Chip **IMDb** (2.500+ phim), **ngày chiếu rạp**, thông báo phim, lượt xem
 
 **Player**
 - 3 tầng: iframe embed → HLS native (hls.js) → iframe wrapper
 - Gộp `movie_episodes` + bảng `streams` (priority / playback_score / health_status)
 - Tự phát hiện nguồn chết: host trả 404 hoặc chặn nhúng (`X-Frame-Options`, `frame-ancestors`) → tự nhảy server khác, **giữ đúng số tập**
 - Tập / server lỗi được đánh dấu ⚠, có nút "Thử nguồn khác" và "Thử lại tất cả"
+- Preview thumbnail tập khi rê chuột (6.000+ tập có ảnh)
 
 **Khác**
 - SEO: title/description/canonical/OG/Twitter + JSON-LD (WebSite, ItemList, Movie, TVSeries, BreadcrumbList), `robots.txt`, `sitemap.xml`, noindex cho trang riêng tư

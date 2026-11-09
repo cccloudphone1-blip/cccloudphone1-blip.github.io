@@ -18,9 +18,23 @@ async function fetchPage(offset, size = 1000) {
   return res.json();
 }
 
+/* bài viết thật trong bảng movie_reviews */
+async function fetchReviews() {
+  const url = `${SB}/rest/v1/movie_reviews?select=slug,updated_at`;
+  const res = await fetch(url, { headers: { ...H, Range: '0-1999' } });
+  if (!res.ok) return [];
+  return res.json();
+}
+
 (async () => {
   const urls = new Map();
   for (const p of STATIC) urls.set(BASE + p, null);
+
+  try {
+    const reviews = await fetchReviews();
+    for (const r of reviews) urls.set(`${BASE}/blog/${r.slug}`, r.updated_at);
+    console.log(`  blog: ${reviews.length}`);
+  } catch {}
 
   let offset = 0;
   while (offset < MAX) {

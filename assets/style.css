@@ -284,3 +284,26 @@ input{font:inherit}
 .eps__grid a.dead{opacity:.42}
 .eps__grid a.dead::after{content:'⚠';margin-left:4px;font-size:10px;color:#f87171}
 #epsServer button .warn{font-style:normal;color:#f87171;font-size:11px}
+
+/* ---------- blog thật (movie_reviews) ---------- */
+.bloggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.blogcard{display:flex;flex-direction:column;gap:6px;padding:16px;border-radius:12px;background:#10141d;border:1px solid var(--line);transition:border-color .15s,transform .15s}
+.blogcard:hover{border-color:#38405a;transform:translateY(-2px)}
+.blogcard__tag{align-self:flex-start;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#ffb4b4;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.4);padding:3px 8px;border-radius:20px}
+.blogcard b{font-size:15px;line-height:1.35;color:var(--txt)}
+.blogcard small{color:var(--muted);font-size:12px}
+.blogcard p{margin:2px 0 0;color:#9aa4b6;font-size:12.8px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.blogcard em{font-style:normal;color:#6f7a8c;font-size:11.5px}
+
+.prose{max-width:78ch;color:#c3cbd8;font-size:14.5px;line-height:1.75}
+.prose p{margin:0 0 14px}
+
+/* ---------- chi tiết: thông báo, imdb ---------- */
+.notice-inline{margin:10px 0 0;padding:9px 12px;border-radius:8px;background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.3);color:#bfe9ff;font-size:12.5px}
+.chip--imdb{background:rgba(245,197,24,.14);border-color:rgba(245,197,24,.45);color:#ffe08a}
+
+/* ---------- preview thumbnail tập ---------- */
+.epPreview{position:absolute;right:14px;top:14px;z-index:6;width:210px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.15);box-shadow:0 12px 30px rgba(0,0,0,.6);pointer-events:none;background:#000}
+.epPreview img{display:block;width:100%;height:auto}
+.player{position:relative}
+@media (max-width:720px){.epPreview{display:none}}

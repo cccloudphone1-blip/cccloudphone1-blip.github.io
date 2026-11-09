@@ -15,10 +15,10 @@ const FIELDS = [
   'episode_current', 'episode_total', 'current_episode', 'total_episodes', 'type', 'status', 'time',
   'category', 'country', 'content', 'view', 'trailer_url', 'backdrop_url', 'hero_backdrop_url',
   'hero_poster_url', 'tmdb_vote_average', 'published_at', 'updated_at', 'actor', 'director',
-  'next_episode_at', 'next_episode_name', 'schedule_type',
+  'next_episode_at', 'next_episode_name', 'schedule_type', 'imdb_id', 'showtimes', 'notify', 'vote_average',
 ].join(',');
 
-const CARD_FIELDS = 'id,slug,name,origin_name,thumb_url,poster_url,year,quality,lang,episode_current,type,tmdb_vote_average,published_at';
+const CARD_FIELDS = 'id,slug,name,origin_name,thumb_url,poster_url,year,quality,lang,episode_current,type,tmdb_vote_average,published_at,view';
 
 const BASE = { is_published: 'eq.true', superseded_by_movie_id: 'is.null' };
 const NEWEST = 'published_at.desc.nullslast';
@@ -413,7 +413,7 @@ async function renderHome() {
     api('movies', { ...BASE, select: CARD_FIELDS, country: 'cs.[{"slug":"viet-nam"}]', order: NEWEST, limit: 14 }),
     api('movies', { ...BASE, select: CARD_FIELDS, order: 'tmdb_popularity.desc.nullslast', limit: 14 }),
     api('movies', { ...BASE, select: CARD_FIELDS, order: 'tmdb_vote_average.desc.nullslast', limit: 10 }),
-    api('movies', { ...BASE, select: CARD_FIELDS, trailer_url: 'not.is.null', order: NEWEST, limit: 14 }),
+    api('movies', { ...BASE, select: CARD_FIELDS, trailer_url: 'neq.', order: NEWEST, limit: 14 }),
     api('movies', { ...BASE, select: CARD_FIELDS, category: 'cs.[{"slug":"dam-my"}]', order: NEWEST, limit: 14 }),
   ]);
   const rows = r => (r.status === 'fulfilled' ? r.value.rows || [] : []);
@@ -594,7 +594,7 @@ async function loadMovie(slug) {
     throw new Error('not found');
   }
   const { rows: eps } = await api('movie_episodes', {
-    select: 'episode_number,episode_name,server_name,link_embed,link_m3u8,audio_type',
+    select: 'episode_number,episode_name,server_name,link_embed,link_m3u8,audio_type,thumbnail_url,subtitle_url,duration',
     movie_id: 'eq.' + movie.id,
     order: 'episode_number.asc',
     limit: 1000,
@@ -613,6 +613,9 @@ async function loadMovie(slug) {
       num: Number(e.episode_number) || s.eps.length + 1,
       name: cleanName(e.episode_name) || 'Tập ' + (e.episode_number || s.eps.length + 1),
       link, embed, m3u8,
+      thumb: e.thumbnail_url || '',
+      dur: e.duration || '',
+      sub: e.subtitle_url || '',
     });
   }
   const list = [...servers.values()]
@@ -669,12 +672,16 @@ function metaChips(m) {
   const rate = rating(m);
   const cats = (m.category || []).map(c => `<a class="chip" href="/the-loai/${esc(c.slug)}">${esc(c.name)}</a>`).join('');
   const countries = (m.country || []).map(c => `<a class="chip" href="/quoc-gia/${esc(c.slug)}">${esc(c.name)}</a>`).join('');
+  const imdb = m.imdb_id && /^tt\d+/.test(String(m.imdb_id))
+    ? `<a class="chip chip--imdb" href="https://www.imdb.com/title/${esc(m.imdb_id)}/" target="_blank" rel="noopener">IMDb ↗</a>` : '';
   return `${m.quality ? `<span class="chip chip--cyan">${esc(m.quality)}</span>` : ''}
     ${m.lang ? `<span class="chip">${esc(m.lang)}</span>` : ''}
     ${m.time ? `<span class="chip">${esc(m.time)}</span>` : ''}
     ${m.episode_current ? `<span class="chip chip--red">${esc(m.episode_current)}</span>` : ''}
     ${rate ? `<span class="chip">★ ${rate.toFixed(1)}</span>` : ''}
     ${m.view ? `<span class="chip">${num(m.view)} lượt xem</span>` : ''}
+    ${/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(m.showtimes || '')) ? `<span class="chip">Chiếu rạp ${esc(String(m.showtimes))}</span>` : ''}
+    ${imdb}
     ${m.year ? `<a class="chip" href="/phim-${m.year}">${m.year}</a>` : ''}
     ${cats}${countries}`;
 }
@@ -762,6 +769,7 @@ async function renderDetail(slug) {
         <div class="metaline">${metaChips(m)}</div>
         <div class="detail__desc clamped" id="desc">${m.content ? (m.content.trim().startsWith('<') ? m.content : `<p>${esc(m.content)}</p>`) : '<p>Chưa có mô tả.</p>'}</div>
         <button class="more" id="moreBtn" type="button">Xem thêm</button>
+        ${m.notify ? `<div class="notice-inline">🔔 ${esc(String(m.notify).slice(0, 200))}</div>` : ''}
         <div class="btnrow">
           ${m.trailer_url ? `<a class="btn btn--ghost" href="${esc(m.trailer_url)}" target="_blank" rel="noopener">Trailer</a>` : ''}
           ${totalEp ? `<a class="btn btn--ghost" href="/xem-phim/${esc(m.slug)}">Xem tập mới nhất</a>` : ''}
@@ -781,6 +789,7 @@ async function renderDetail(slug) {
   </section>
 
   <section class="section" id="related"></section>
+  <section class="section" id="story"></section>
   <section class="section" id="reviews"></section>`;
 
   document.getElementById('moreBtn')?.addEventListener('click', e => {
@@ -792,6 +801,7 @@ async function renderDetail(slug) {
   if (fb) bindFav(fb, m);
 
   renderReviews(m);
+  loadStory(m);
   mountEpisodes(m, servers, { sv: 0, ep: 0, watchPage: false });
   relatedSection(m).then(rows => {
     const el = document.getElementById('related');
@@ -1071,7 +1081,7 @@ function mountEpisodes(movie, servers, state) {
 
     const grid = document.getElementById('epsGrid');
     if (grid) {
-      grid.innerHTML = server.eps.map((e, i) => `<a href="/xem-phim/${esc(movie.slug)}?sv=${cur.sv}&ep=${i}" data-ep="${i}" class="${i === cur.ep ? 'on' : ''}${isPlayable(e) ? '' : ' dead'}">${esc(e.name)}</a>`).join('');
+      grid.innerHTML = server.eps.map((e, i) => `<a href="/xem-phim/${esc(movie.slug)}?sv=${cur.sv}&ep=${i}" data-ep="${i}"${e.thumb ? ` data-thumb="${esc(e.thumb)}"` : ''} class="${i === cur.ep ? 'on' : ''}${isPlayable(e) ? '' : ' dead'}">${esc(e.name)}</a>`).join('');
       grid.querySelectorAll('a').forEach(a => a.addEventListener('click', ev => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -1081,6 +1091,24 @@ function mountEpisodes(movie, servers, state) {
       }));
       const act = grid.querySelector('a.on');
       if (act) grid.scrollTop = Math.max(0, act.offsetTop - grid.clientHeight / 2 + act.clientHeight / 2);
+
+      /* preview thumbnail tập khi rê chuột */
+      if (grid.querySelector('a[data-thumb]')) {
+        let pv = playerBox.parentElement.querySelector('.epPreview');
+        if (!pv) {
+          pv = document.createElement('div');
+          pv.className = 'epPreview';
+          pv.hidden = true;
+          playerBox.parentElement.appendChild(pv);
+        }
+        grid.querySelectorAll('a[data-thumb]').forEach(a => {
+          a.addEventListener('mouseenter', () => {
+            pv.innerHTML = `<img src="${esc(a.dataset.thumb)}" alt="" onerror="this.parentElement.hidden=true">`;
+            pv.hidden = false;
+          });
+          a.addEventListener('mouseleave', () => { pv.hidden = true; });
+        });
+      }
     }
 
     const now = document.getElementById('epNow');
@@ -1128,7 +1156,7 @@ function searchForm(values = {}) {
     <select name="cat">${opt(GENRES, values.cat, 'Thể loại')}</select>
     <select name="country">${opt(COUNTRIES, values.country, 'Quốc gia')}</select>
     <select name="year">${['', 2026, 2025, 2024, 2023, 2022, 2021, 2020].map(y => `<option value="${y}"${String(values.year || '') === String(y) ? ' selected' : ''}>${y || 'Năm'}</option>`).join('')}</select>
-    <select name="sort">${[['new', 'Mới nhất'], ['rating', 'Điểm cao'], ['name', 'Tên A-Z']].map(([v, n]) => `<option value="${v}"${values.sort === v ? ' selected' : ''}>${n}</option>`).join('')}</select>
+    <select name="sort">${[['watch', 'Xem nhiều'], ['new', 'Mới nhất'], ['rating', 'Điểm cao'], ['name', 'Tên A-Z']].map(([v, n]) => `<option value="${v}"${values.sort === v ? ' selected' : ''}>${n}</option>`).join('')}</select>
     <button class="btn btn--primary" type="submit">Tìm</button>
   </form>`;
 }
@@ -1139,7 +1167,7 @@ function buildParams(v) {
   if (v.cat) p.category = `cs.[{"slug":"${v.cat}"}]`;
   if (v.country) p.country = `cs.[{"slug":"${v.country}"}]`;
   if (v.year) p.year = 'eq.' + v.year;
-  p.order = v.sort === 'rating' ? 'tmdb_vote_average.desc.nullslast' : v.sort === 'name' ? 'name.asc' : NEWEST;
+  p.order = v.sort === 'watch' ? 'view.desc.nullslast' : v.sort === 'rating' ? 'tmdb_vote_average.desc.nullslast' : v.sort === 'name' ? 'name.asc' : NEWEST;
   const t = term(v.q);
   if (t) p.or = `(name.ilike.*${t}*,origin_name.ilike.*${t}*)`;
   return p;
@@ -1391,23 +1419,102 @@ async function renderActorSlug(slug) {
   await renderActors(params);
 }
 
-function renderBlog(slug) {
+/* ---------------- blog thật (bảng movie_reviews) ---------------- */
+const RV_FIELDS = 'slug,movie_name,origin_name,content,word_count,updated_at';
+
+async function fetchReview(slug) {
+  const { rows } = await api('movie_reviews', { select: RV_FIELDS, slug: 'eq.' + slug, limit: 1 });
+  return rows[0] || null;
+}
+
+function chunkParagraphs(text, per = 4) {
+  const src = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!src) return [];
+  const sentences = src.match(/[^.!?]+[.!?]+/g) || [src];
+  const out = [];
+  for (let i = 0; i < sentences.length; i += per) out.push(sentences.slice(i, i + per).join(' ').trim());
+  return out;
+}
+
+async function loadStory(m) {
+  const el = document.getElementById('story');
+  if (!el) return;
+  try {
+    const r = await fetchReview(m.slug);
+    if (!r) { el.remove(); return; }
+    el.innerHTML = `<div class="section__head"><h2>Giới thiệu phim</h2><a href="/blog/${esc(r.slug)}">Đọc riêng →</a></div>
+      <article class="prose">${chunkParagraphs(r.content).map(p => `<p>${esc(p)}</p>`).join('')}</article>`;
+  } catch { el.remove(); }
+}
+
+async function renderBlog(slug) {
+  const page = Math.max(1, parseInt(new URLSearchParams(location.search).get('page')) || 1);
+
+  if (slug) {
+    app.innerHTML = loading('Đang tải bài viết...');
+    try {
+      const r = await fetchReview(slug);
+      if (!r) throw new Error('not found');
+      const summary = plain(r.content || '').slice(0, 157);
+      setHead({
+        title: `${r.movie_name} – Giới thiệu & đánh giá | ${SITE_NAME}`,
+        description: summary,
+        path: '/blog/' + slug,
+        jsonld: [
+          {
+            '@context': 'https://schema.org', '@type': 'Article',
+            headline: `${r.movie_name} – giới thiệu phim`,
+            description: summary,
+            url: SITE() + '/blog/' + slug,
+            dateModified: r.updated_at,
+            wordCount: r.word_count || undefined,
+            author: { '@type': 'Organization', name: SITE_NAME },
+            publisher: { '@type': 'Organization', name: SITE_NAME },
+          },
+          breadcrumbLD([{ name: SITE_NAME, path: '/' }, { name: 'Blog', path: '/blog' }, { name: r.movie_name, path: '/blog/' + slug }]),
+        ],
+      });
+      app.innerHTML = `<div class="pagehead">${crumbs([{ text: 'Trang chủ', href: '/' }, { text: 'Blog', href: '/blog' }, { text: r.movie_name }])}
+          <h1>${esc(r.movie_name)}</h1>
+          <p class="count">${esc(r.origin_name || '')} · ${num(r.word_count || 0)} từ · cập nhật ${new Date(r.updated_at).toLocaleDateString('vi-VN')}</p>
+          <div class="btnrow"><a class="btn btn--primary" href="/phim/${esc(slug)}">Xem phim</a><a class="btn btn--ghost" href="/blog">Bài khác</a></div>
+        </div>
+        <section class="section"><article class="prose">${chunkParagraphs(r.content).map(p => `<p>${esc(p)}</p>`).join('')}</article></section>`;
+    } catch {
+      setHead({ title: `Không tìm thấy bài viết | ${SITE_NAME}`, description: '', path: '/blog/' + slug, robots: 'noindex, follow' });
+      app.innerHTML = `<div class="pagehead">${crumbs([{ text: 'Trang chủ', href: '/' }, { text: 'Blog', href: '/blog' }, { text: 'Không tìm thấy' }])}
+        <h1>Không tìm thấy bài viết</h1><a class="btn btn--ghost" href="/blog">Về blog</a></div>`;
+    }
+    window.scrollTo(0, 0);
+    return;
+  }
+
   setHead({
-    title: slug ? `Bài viết | ${SITE_NAME}` : `Blog phim | ${SITE_NAME}`,
-    description: 'Bài viết, danh sách và gợi ý phim trên KhoPhim.',
-    path: '/blog' + (slug ? '/' + slug : ''),
+    title: `Blog phim – giới thiệu, đánh giá | ${SITE_NAME}`,
+    description: 'Bài giới thiệu và đánh giá phim trên KhoPhim, cập nhật từ kho nội dung.',
+    path: '/blog',
   });
   app.innerHTML = `<div class="pagehead">${crumbs([{ text: 'Trang chủ', href: '/' }, { text: 'Blog' }])}
-      <h1>Blog phim</h1><p>Gợi ý và tổng hợp từ kho phim.</p></div>
+      <h1>Blog phim</h1><p>Giới thiệu và đánh giá từng phim.</p></div>
     <section class="section" id="blogList">${loading()}</section>`;
-  api('movies', { ...BASE, select: CARD_FIELDS + ',content', order: 'tmdb_vote_average.desc.nullslast', limit: 6 })
-    .then(({ rows }) => {
-      document.getElementById('blogList').innerHTML = `<div class="hist">${rows.map(m => `<a class="hist__row" href="/phim/${esc(m.slug)}">
-        <img src="${esc(m.poster_url || m.thumb_url || '')}" alt="" loading="lazy" onerror="this.classList.add('ph')">
-        <div><b>${esc(m.name)} (${esc(m.year || '')})</b><small>${esc(plain(m.content || '').slice(0, 130))}</small></div>
-        <span class="chip chip--red">Xem phim</span></a>`).join('')}</div>`;
-    })
-    .catch(() => { document.getElementById('blogList').innerHTML = emptyBox('Không tải được bài viết.'); });
+
+  try {
+    const res = await api('movie_reviews', { select: RV_FIELDS, order: 'updated_at.desc' }, { page, per: 20, paged: true });
+    const rows = res.rows;
+    if (!rows.length) throw new Error('empty');
+    document.getElementById('blogList').innerHTML = `
+      <p class="count">${num(res.total)} bài viết · trang ${page}/${res.totalPages}</p>
+      <div class="bloggrid">${rows.map(r => `<a class="blogcard" href="/blog/${esc(r.slug)}">
+        <span class="blogcard__tag">Giới thiệu phim</span>
+        <b>${esc(r.movie_name)}</b>
+        <small>${esc(r.origin_name || '')}</small>
+        <p>${esc(plain(r.content || '').slice(0, 150))}...</p>
+        <em>${num(r.word_count || 0)} từ</em>
+      </a>`).join('')}</div>
+      ${pager(page, res.totalPages, p => `/blog${p > 1 ? '?page=' + p : ''}`)}`;
+  } catch {
+    document.getElementById('blogList').innerHTML = emptyBox('Không tải được bài viết.');
+  }
   window.scrollTo(0, 0);
 }
 
