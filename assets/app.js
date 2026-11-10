@@ -305,27 +305,18 @@ const bgUrl = m => m.hero_backdrop_url || m.backdrop_url || m.thumb_url || m.pos
 
 function card(m) {
   const rate = rating(m);
-  return `<div class="movie-card-3d-wrap" data-title="${esc(m.name || '')}">
-    <a class="card movie-card" href="/phim/${esc(m.slug)}">
-      <div class="card__img">
-        <img class="movie-poster" src="${esc(m.poster_url || m.thumb_url || '')}" alt="${esc(m.name)}" loading="lazy" onerror="this.classList.add('ph')">
-        <div class="card-specular-glare"></div>
-        ${rate ? `<span class="movie-ep-pill ios27-glass">★ ${rate.toFixed(1)}</span>` : ''}
-        ${m.quality ? `<span class="card__q">${esc(m.quality)}</span>` : ''}
-        ${m.episode_current ? `<span class="card__ep">${esc(m.episode_current)}</span>` : ''}
-        <div class="movie-float-play ios27-glass">▶</div>
-        <div class="movie-glass-dock ios27-glass">
-          <div class="movie-name">${esc(m.name)}</div>
-          <div class="movie-meta">
-            <span>${m.year || 2025} • ${esc(m.quality || 'FHD')}</span>
-            <span style="color: #67e8f9;">★ ${rate ? rate.toFixed(1) : '9.0'}</span>
-          </div>
-        </div>
-      </div>
-    </a>
-  </div>`;
+  return `<a class="card" href="/phim/${esc(m.slug)}">
+    <div class="card__img">
+      <img src="${esc(m.poster_url || m.thumb_url || '')}" alt="${esc(m.name)}" loading="lazy" onerror="this.classList.add('ph')">
+      ${rate ? `<span class="card__rate">★ ${rate.toFixed(1)}</span>` : ''}
+      ${m.quality ? `<span class="card__q">${esc(m.quality)}</span>` : ''}
+      ${m.episode_current ? `<span class="card__ep">${esc(m.episode_current)}</span>` : ''}
+      <span class="card__play" title="Xem ngay"><span>▶</span></span>
+    </div>
+    <div class="card__name">${esc(m.name)}</div>
+    <div class="card__sub">${esc(m.origin_name || '')}${m.year ? ' · ' + m.year : ''}</div>
+  </a>`;
 }
-
 const gridHtml = rows => `<div class="grid">${rows.map(card).join('')}</div>`;
 const rowHtml = rows => `<div class="row">${rows.map(card).join('')}</div>`;
 
@@ -404,49 +395,35 @@ function heroSlide(m, i) {
     <div class="hero-vignette-overlay"></div>
     <div class="hero-content">
       <div class="hero-badges-row">
-        <span class="hero-badge badge-hot">🔥 ${i === 0 ? 'BOM TẤN CHIẾU RẠP 2025' : 'NỔI BẬT HÔM NAY'}</span>
-        <span class="hero-badge badge-quality">${esc(m.quality || '4K ULTRA HD')}</span>
+        <span class="hero-badge badge-hot">🔥 ${i === 0 ? 'BOM TẤN CHIẾU RẠP' : 'NỔI BẬT HÔM NAY'}</span>
+        <span class="hero-badge badge-quality">${esc(m.quality || 'FHD')}</span>
         <span class="hero-badge badge-imdb">★ ${rate.toFixed(1)} IMDb</span>
-        <span class="hero-badge badge-sound">${esc(m.lang || 'VIETSUB + THUYẾT MINH VSMOV')}</span>
+        <span class="hero-badge badge-sound">${esc(m.lang || 'VIETSUB')}</span>
       </div>
       <h1 class="hero-title">
         ${esc(m.name)}
         ${m.origin_name ? `<span class="sub-title">${esc(m.origin_name)}${m.year ? ` • ${m.year}` : ''}</span>` : ''}
       </h1>
       <p class="hero-synopsis">
-        ${esc(plain(m.content || '')).slice(0, 260) || 'Khám phá bộ phim hấp dẫn với chất lượng âm thanh và hình ảnh sắc nét trên nền tảng kính lỏng h0syh0aπg Cinema.'}
+        ${esc(plain(m.content || '')).slice(0, 260) || 'Khám phá bộ phim hấp dẫn với chất lượng âm thanh và hình ảnh sắc nét trên h0syh0aπg Cinema.'}
       </p>
       <div class="hero-actions">
-        <div class="glassplay-anchor-container">
-          <a class="glassplay-btn" href="/xem-phim/${esc(m.slug)}">
-            <div class="glassplay-content">
-              <span class="play-icon-circle">▶</span>
-              <span class="glassplay-label">Xem Phim Ngay</span>
-            </div>
-          </a>
-        </div>
-        <a class="hero-secondary-btn ios27-glass" href="/phim/${esc(m.slug)}">
+        <a class="hero-watch-btn" href="/xem-phim/${esc(m.slug)}">
+          <span class="play-icon-circle">▶</span>
+          <span>Xem Phim Ngay</span>
+        </a>
+        <a class="hero-secondary-btn" href="/phim/${esc(m.slug)}">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="16" x2="12" y2="12"></line>
             <line x1="12" y1="8" x2="12.01" y2="8"></line>
           </svg>
-          <span>Chi Tiết Phim</span>
+          <span>Thông Tin Phim</span>
         </a>
-      </div>
-      <div class="hero-refraction-strip">
-        <div class="under-glass-orbs">
-          <div class="color-orb o1"></div>
-          <div class="color-orb o2"></div>
-          <div class="color-orb o3"></div>
-          <div class="color-orb o4"></div>
-        </div>
-        <span class="glassplay-status">💧 Kính lỏng tương tác thực • CDN VSMOV • h0syh0aπg</span>
       </div>
     </div>
   </div>`;
 }
-
 function initHero() {
   const hero = document.getElementById('hero');
   if (!hero) return;
@@ -507,18 +484,18 @@ async function renderHome() {
 
   const hero = document.getElementById('hero');
   const doctorXFeatured = {
-    name: 'Bác Sĩ X: Phần Điện Ảnh Cuối Cùng',
-    origin_name: 'Doctor-X: The Movie FINAL (劇場版ドクターX FINAL)',
-    slug: 'bac-si-x-phan-dien-anh-cuoi-cung-2025',
-    year: 2025,
-    quality: '4K HDR',
-    lang: 'Vietsub + Thuyết Minh VSMOV',
-    rate: 9.9,
-    episode_current: 'Bản Rạp Trọn Bộ',
-    content: 'Daimon Michiko – nữ bác sĩ ngoại khoa tự do huyền thoại với tuyên ngôn bất hủ "Tôi không bao giờ thất bại!". Trong phần phim điện ảnh đỉnh cao khép lại toàn bộ huyền thoại Doctor-X, Michiko đối đầu viện trưởng mới tàn độc tại Bệnh viện Totei và hé lộ bí mật chấn động về nguồn cội quá khứ cô độc của chính cô.',
-    poster_url: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&w=800&q=80',
-    hero_backdrop_url: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1600&q=80',
-    thumb_url: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&w=800&q=80',
+    name: 'Bác Sĩ X: Phim Điện Ảnh',
+    origin_name: 'Doctor X: The Movie Final',
+    slug: 'bac-si-x-phim-dien-anh',
+    year: 2024,
+    quality: 'FHD',
+    lang: 'Vietsub',
+    rate: 9.8,
+    episode_current: 'Hoàn Tất (1/1)',
+    content: 'Dàn diễn viên ngôi sao của loạt phim truyền hình ăn khách chính thức hội tụ trong bản điện ảnh đỉnh cao của Doctor-X! Nữ bác sĩ ngoại khoa tự do thiên tài Daimon Michiko (Ryoko Yonekura) bước vào ca phẫu thuật hiểm nghèo chưa từng có tiền lệ: "Tôi không bao giờ thất bại!".',
+    poster_url: 'https://phimimg.com/uploads/movies/20260806/bac-si-x-phim-dien-anh-poster.webp',
+    hero_backdrop_url: 'https://phimimg.com/uploads/movies/20260806/bac-si-x-phim-dien-anh-thumb.webp',
+    thumb_url: 'https://phimimg.com/uploads/movies/20260806/bac-si-x-phim-dien-anh-thumb.webp',
     category: [{ name: 'Y Khoa' }, { name: 'Chính Kịch' }, { name: 'Điện Ảnh Chiếu Rạp' }]
   };
   const pool = [doctorXFeatured, ...rows(latest).slice(0, 5)];
@@ -2073,172 +2050,45 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 }
 
 
+
+
 /* ==========================================================================
-   LIQUID GLASS ENGINE (APPLE iOS 27 + VIVO ORIGINOS 7) - h0syh0aπg
+   CINEMA UI CONTROLLER - h0syh0aπg Cinema
    ========================================================================== */
-function initLiquidGlass() {
-  // 1. NÚT GLASSPLAY: KÉO DÃN TRONG VÙNG KIỂM SOÁT & BÚNG HỒI SIÊU TỐC
-  const glassPlayBtns = document.querySelectorAll('.glassplay-btn');
-  glassPlayBtns.forEach(btn => {
-    if (btn._liquidBound) return;
-    btn._liquidBound = true;
-
-    const content = btn.querySelector('.glassplay-content');
-    let isDragging = false;
-    let startX = 0, startY = 0;
-    let animId = null;
-    let curX = 0, curY = 0;
-
-    btn.addEventListener('pointerdown', (e) => {
-      if (e.button !== undefined && e.button !== 0) return;
-      isDragging = true;
-      startX = e.clientX;
-      startY = e.clientY;
-      btn.classList.add('is-dragging');
-      try { btn.setPointerCapture(e.pointerId); } catch {}
-      if (animId) { cancelAnimationFrame(animId); animId = null; }
-    });
-
-    btn.addEventListener('pointermove', (e) => {
-      const rect = btn.getBoundingClientRect();
-      const relX = ((e.clientX - rect.left) / rect.width) * 100;
-      const relY = ((e.clientY - rect.top) / rect.height) * 100;
-      btn.style.setProperty('--mouse-x', `${Math.max(0, Math.min(100, relX)).toFixed(1)}%`);
-      btn.style.setProperty('--mouse-y', `${Math.max(0, Math.min(100, relY)).toFixed(1)}%`);
-
-      if (!isDragging) return;
-
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      const dist = Math.hypot(dx, dy);
-
-      const maxDrag = 75; // Giới hạn vùng kéo tự nhiên
-      const clampedDist = (dist * maxDrag) / (dist + maxDrag);
-
-      const nx = dist > 0 ? dx / dist : 0;
-      const ny = dist > 0 ? dy / dist : 0;
-      const posX = nx * clampedDist;
-      const posY = ny * clampedDist;
-
-      // Kéo dãn nhẹ nhàng theo hướng chuyển động
-      const stretchX = 1 + Math.abs(posX / maxDrag) * 0.12;
-      const stretchY = 1 + Math.abs(posY / maxDrag) * 0.12;
-
-      // Độ nghiêng 3D tinh tế tối đa ±6 độ - TUYỆT ĐỐI KHÔNG XOAY 360 ĐỘ LỘN CHỮ
-      const tiltX = (-posY / maxDrag) * 6;
-      const tiltY = (posX / maxDrag) * 6;
-
-      // Viền lỏng biến thiên hữu cơ (Organic Fluid Border-Radius)
-      const normX = posX / maxDrag;
-      const normY = posY / maxDrag;
-      const rTL = Math.round(Math.max(26, Math.min(54, 40 - normX * 12 - normY * 12)));
-      const rTR = Math.round(Math.max(26, Math.min(54, 40 + normX * 12 - normY * 12)));
-      const rBR = Math.round(Math.max(26, Math.min(54, 40 + normX * 12 + normY * 12)));
-      const rBL = Math.round(Math.max(26, Math.min(54, 40 - normX * 12 + normY * 12)));
-
-      curX = posX;
-      curY = posY;
-
-      btn.style.transform = `perspective(900px) translate3d(${posX.toFixed(1)}px, ${posY.toFixed(1)}px, 0) rotateX(${tiltX.toFixed(1)}deg) rotateY(${tiltY.toFixed(1)}deg) scale(${stretchX.toFixed(3)}, ${stretchY.toFixed(3)})`;
-      btn.style.borderRadius = `${rTL}px ${rTR}px ${rBR}px ${rBL}px`;
-
-      if (content) {
-        content.style.transform = `translate3d(${(posX * 0.2).toFixed(1)}px, ${(posY * 0.2).toFixed(1)}px, 0)`;
-      }
-    });
-
-    const finishDrag = (e) => {
-      if (!isDragging) return;
-      isDragging = false;
-      btn.classList.remove('is-dragging');
-      if (e && e.pointerId) {
-        try { if (btn.hasPointerCapture(e.pointerId)) btn.releasePointerCapture(e.pointerId); } catch {}
-      }
-
-      const totalMove = Math.hypot(curX, curY);
-
-      // LÒ XO CAO TẦNG BÚNG HỒI VỀ SIÊU TỐC (< 100ms)
-      let snapX = curX;
-      let snapY = curY;
-      let vx = 0, vy = 0;
-      const stiffness = 0.45;
-      const damping = 0.65;
-
-      function springTick() {
-        const fx = -snapX * stiffness;
-        const fy = -snapY * stiffness;
-        vx = (vx + fx) * damping;
-        vy = (vy + fy) * damping;
-        snapX += vx;
-        snapY += vy;
-
-        const pX = snapX.toFixed(1);
-        const pY = snapY.toFixed(1);
-        btn.style.transform = `perspective(900px) translate3d(${pX}px, ${pY}px, 0) scale(1)`;
-
-        if (content) {
-          content.style.transform = `translate3d(${(snapX * 0.2).toFixed(1)}px, ${(snapY * 0.2).toFixed(1)}px, 0)`;
-        }
-
-        if (Math.hypot(snapX, snapY) < 0.3 && Math.hypot(vx, vy) < 0.3) {
-          btn.style.transform = '';
-          btn.style.borderRadius = '';
-          if (content) content.style.transform = '';
-          animId = null;
-        } else {
-          animId = requestAnimationFrame(springTick);
-        }
-      }
-      animId = requestAnimationFrame(springTick);
-
-      if (totalMove < 6 && btn.getAttribute('href')) {
-        const href = btn.getAttribute('href');
-        if (href) go(href);
-      }
-    };
-
-    btn.addEventListener('pointerup', finishDrag);
-    btn.addEventListener('pointercancel', finishDrag);
-    btn.addEventListener('click', (e) => {
-      if (Math.hypot(curX, curY) >= 6) {
-        e.preventDefault();
-      }
-    });
-  });
-
-  // 2. TABBAR KÍNH LỎNG iOS 27 (HỖ TRỢ CẢ BẤM LẪN KÉO RÊ CHUỘT)
+function initCinemaUI() {
+  // 1. TABBAR DANH MỤC PHIM (CLICK HOẶC KÉO RÊ CHUYỂN TAB)
   const tabBar = document.getElementById('ios27TabBar');
   const droplet = document.getElementById('tabWaterDroplet');
   if (tabBar && droplet && !tabBar._bound) {
     tabBar._bound = true;
     const tabs = [...tabBar.querySelectorAll('.tab-btn')];
 
-    function updateDroplet(activeTab, stretchX = 1, skewX = 0) {
+    function updateDroplet(activeTab) {
       if (!activeTab) return;
       const tRect = activeTab.getBoundingClientRect();
       const bRect = tabBar.getBoundingClientRect();
       const left = tRect.left - bRect.left;
-      const width = tRect.width;
-
-      droplet.style.transform = `translate3d(${left}px, 0, 0) scaleX(${stretchX}) skewX(${skewX}deg)`;
-      droplet.style.width = `${width}px`;
+      droplet.style.transform = `translate3d(${left}px, 0, 0)`;
+      droplet.style.width = `${tRect.width}px`;
     }
 
-    const initialActive = tabs.find(t => t.classList.contains('active')) || tabs[0];
-    if (initialActive) updateDroplet(initialActive);
+    // Cập nhật tab active theo pathname hiện tại
+    const currentPath = location.pathname;
+    const matchedTab = tabs.find(t => t.getAttribute('href') === currentPath) || tabs[0];
+    tabs.forEach(t => t.classList.toggle('active', t === matchedTab));
+    updateDroplet(matchedTab);
 
     tabs.forEach(tab => {
       tab.addEventListener('click', (e) => {
         tabs.forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
-        droplet.style.transition = 'transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)';
+        droplet.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.3s ease';
         updateDroplet(tab);
       });
     });
 
-    let isTabDragging = false;
-    let dragStartX = 0;
-    let lastTab = initialActive;
+    let isDragging = false;
+    let lastTab = matchedTab;
 
     tabBar.addEventListener('pointerdown', (e) => {
       if (e.button !== undefined && e.button !== 0) return;
@@ -2248,13 +2098,12 @@ function initLiquidGlass() {
         targetTab.classList.add('active');
         lastTab = targetTab;
       }
-      isTabDragging = true;
-      dragStartX = e.clientX;
+      isDragging = true;
       droplet.style.transition = 'none';
     });
 
     window.addEventListener('pointermove', (e) => {
-      if (!isTabDragging) return;
+      if (!isDragging) return;
       const bRect = tabBar.getBoundingClientRect();
       const relX = Math.max(0, Math.min(bRect.width, e.clientX - bRect.left));
 
@@ -2271,20 +2120,16 @@ function initLiquidGlass() {
         tabs.forEach(t => t.classList.remove('active'));
         closestTab.classList.add('active');
         lastTab = closestTab;
+        updateDroplet(closestTab);
       }
-
-      const dx = e.clientX - dragStartX;
-      const stretch = Math.min(1.4, Math.max(0.85, 1 + Math.abs(dx) * 0.002));
-      const skew = Math.max(-12, Math.min(12, dx * 0.1));
-      updateDroplet(closestTab, stretch, skew);
     });
 
     window.addEventListener('pointerup', () => {
-      if (!isTabDragging) return;
-      isTabDragging = false;
-      droplet.style.transition = 'transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.28s cubic-bezier(0.34, 1.56, 0.64, 1)';
+      if (!isDragging) return;
+      isDragging = false;
+      droplet.style.transition = 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.25s ease';
       if (lastTab) {
-        updateDroplet(lastTab, 1, 0);
+        updateDroplet(lastTab);
         const href = lastTab.getAttribute('href');
         if (href && location.pathname !== href) {
           go(href);
@@ -2293,7 +2138,7 @@ function initLiquidGlass() {
     });
   }
 
-  // 3. NÚT 3 CHẤM LIỀN MẠCH ORIGINOS 7 (CONTAINER MORPHING)
+  // 2. NÚT 3 CHẤM MENU TIỆN ÍCH MỞ RỘNG
   const originMorphIsland = document.getElementById('originMorphIsland');
   const morphDotsTrigger = document.getElementById('morphDotsTrigger');
   const morphCloseBtn = document.getElementById('morphCloseBtn');
@@ -2301,12 +2146,12 @@ function initLiquidGlass() {
   if (originMorphIsland && !originMorphIsland._bound) {
     originMorphIsland._bound = true;
 
-    const toggleMorph = (e) => {
+    const toggleMenu = (e) => {
       e.stopPropagation();
       originMorphIsland.classList.toggle('expanded');
     };
 
-    morphDotsTrigger?.addEventListener('click', toggleMorph);
+    morphDotsTrigger?.addEventListener('click', toggleMenu);
     morphCloseBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       originMorphIsland.classList.remove('expanded');
@@ -2318,42 +2163,8 @@ function initLiquidGlass() {
       }
     });
   }
-
-  // 4. HIỆU ỨNG THẺ PHIM 3D PARALLAX TILT
-  const cardWraps = document.querySelectorAll('.movie-card-3d-wrap');
-  cardWraps.forEach(wrap => {
-    if (wrap._tiltBound) return;
-    wrap._tiltBound = true;
-
-    const card = wrap.querySelector('.movie-card');
-    const glare = wrap.querySelector('.card-specular-glare');
-    if (!card) return;
-
-    wrap.addEventListener('mousemove', (e) => {
-      const rect = wrap.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const cx = rect.width / 2;
-      const cy = rect.height / 2;
-
-      const rotX = -((y - cy) / cy) * 10;
-      const rotY = ((x - cx) / cx) * 10;
-
-      card.style.transform = `perspective(800px) rotateX(${rotX.toFixed(1)}deg) rotateY(${rotY.toFixed(1)}deg) translateY(-8px) scale(1.02)`;
-
-      if (glare) {
-        glare.style.opacity = '1';
-        glare.style.background = `radial-gradient(circle 120px at ${x}px ${y}px, rgba(255,255,255,0.28), transparent 70%)`;
-      }
-    });
-
-    wrap.addEventListener('mouseleave', () => {
-      card.style.transform = '';
-      if (glare) {
-        glare.style.opacity = '0';
-      }
-    });
-  });
 }
 
-setTimeout(initLiquidGlass, 100);
+addEventListener('popstate', () => { route(); setTimeout(initCinemaUI, 60); });
+route();
+setTimeout(initCinemaUI, 100);
