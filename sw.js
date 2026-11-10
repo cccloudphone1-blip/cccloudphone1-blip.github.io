@@ -1,6 +1,6 @@
 /* Service worker: cache app shell, bỏ qua request khác origin */
-const SHELL = 'kp-shell-v2';
-const ASSETS = ['/', '/assets/app.js', '/assets/style.css', '/brand/khophim-logo-v2.png', '/brand/khophim-favicon-v2-96.png', '/site.webmanifest'];
+const SHELL = 'kp-shell-v3-vsmov';
+const ASSETS = ['/', '/assets/app.js?v=20261110_vsmov3', '/assets/style.css?v=20261110_vsmov3', '/brand/khophim-logo-v2.png', '/brand/khophim-favicon-v2-96.png', '/site.webmanifest'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));

@@ -390,7 +390,8 @@ function heroSlide(m, i) {
   const cats = (m.category || []).slice(0, 3).map(c => esc(c.name)).join(' · ');
   const rate = rating(m) || 9.4;
   const bgImg = m.hero_backdrop_url || m.backdrop_url || m.thumb_url || m.poster_url || '';
-  return `<div class="cinematic-hero hero__inner" data-slide="${i}" ${i ? 'hidden' : ''}>
+  const isFirst = i === 0;
+  return `<div class="cinematic-hero hero__inner" data-slide="${i}" ${isFirst ? '' : 'hidden'} style="display:${isFirst ? 'flex' : 'none'}">
     <img class="hero-backdrop-img" src="${esc(bgImg)}" alt="${esc(m.name)}" onerror="this.src='https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1600&q=80'">
     <div class="hero-vignette-overlay"></div>
     <div class="hero-content">
@@ -434,7 +435,16 @@ function initHero() {
   let idx = 0, timer;
   const show = n => {
     idx = (n + slides.length) % slides.length;
-    slides.forEach((s, i) => { s.hidden = i !== idx; });
+    slides.forEach((s, i) => {
+      const active = i === idx;
+      if (active) {
+        s.removeAttribute('hidden');
+        s.style.display = 'flex';
+      } else {
+        s.setAttribute('hidden', '');
+        s.style.display = 'none';
+      }
+    });
     imgs.forEach((s, i) => s.classList.toggle('on', i === idx));
     dots.forEach((d, i) => d.classList.toggle('on', i === idx));
   };
@@ -1560,10 +1570,29 @@ function mountEpisodes(movie, servers, state) {
               }
             }
           }
+          const vsmovSv = servers.find(s => /vsmov/i.test(s.name) && s.eps && s.eps[cur.ep]);
+          if (vsmovSv) {
+            const vEp = vsmovSv.eps[cur.ep];
+            const vSrc = vEp.embed || vEp.m3u8 || vEp.link;
+            if (vSrc) {
+              playerBox.innerHTML = `<iframe src="${esc(vSrc)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
+              mountPlayerCtl(null, vEp);
+              markAlive(vSrc);
+              notice('');
+              return;
+            }
+          }
+          if (item.embed) {
+            playerBox.innerHTML = `<iframe src="${esc(item.embed)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
+            mountPlayerCtl(null, item);
+            markAlive(item.embed);
+            notice('');
+            return;
+          }
           const wrap = 'https://player.phimapi.com/player/?url=' + encodeURIComponent(item.m3u8);
           playerBox.innerHTML = `<iframe src="${esc(wrap)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
           mountPlayerCtl(null, item);
-          notice('Không phát trực tiếp được — đang dùng player nhúng dự phòng.');
+          notice('');
         });
       }, () => markAlive(item.m3u8));
     } else {
@@ -1699,16 +1728,70 @@ async function renderSearch(params) {
   const box = document.getElementById('sres');
   box.innerHTML = loading('Đang tìm...');
   try {
-    const res = await api('movies', { ...BASE, select: CARD_FIELDS, ...buildParams(eq) }, { page, paged: true });
+    const [res, vsmovRes, phimapiRes] = await Promise.allSettled([
+      api('movies', { ...BASE, select: CARD_FIELDS, ...buildParams(eq) }, { page, paged: true }),
+      q ? fetch(`https://vsmov.com/api/tim-kiem?keyword=${encodeURIComponent(q)}`).then(r => r.json()) : Promise.resolve(null),
+      q ? fetch(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(q)}&limit=16`).then(r => r.json()) : Promise.resolve(null),
+    ]);
+
+    const supabaseRes = res.status === 'fulfilled' ? res.value : { rows: [], total: 0, totalPages: 1 };
     const qs = new URLSearchParams(Object.entries(eq).filter(([, v]) => v)).toString();
     const low = term(q).toLowerCase();
     const localHits = localMovies()
       .filter(m => !low || [m.name, m.origin_name].filter(Boolean).some(x => String(x).toLowerCase().includes(low)))
       .map(m => ({ ...m, _local: true }));
-    const allRows = [...localHits, ...res.rows];
-    box.innerHTML = `<p class="count">${res.total ? `${num(res.total + localHits.length)} kết quả · trang ${page}/${res.totalPages}` : 'Không có kết quả'}</p>
+
+    let vsmovHits = [];
+    if (vsmovRes.status === 'fulfilled' && vsmovRes.value) {
+      const vItems = (vsmovRes.value.data && vsmovRes.value.data.items) || vsmovRes.value.items || [];
+      if (Array.isArray(vItems)) {
+        vsmovHits = vItems.map(m => ({
+          name: m.name || '',
+          origin_name: m.origin_name || '',
+          slug: m.slug,
+          year: m.year || '',
+          thumb_url: m.thumb_url || m.poster_url || '',
+          poster_url: m.poster_url || m.thumb_url || '',
+          quality: 'FHD',
+          lang: 'Vietsub VSMOV',
+          episode_current: m.episode_current || 'Tập mới',
+          _liveSource: 'vsmov'
+        }));
+      }
+    }
+
+    let phimapiHits = [];
+    if (phimapiRes.status === 'fulfilled' && phimapiRes.value?.data?.items) {
+      const pItems = phimapiRes.value.data.items;
+      if (Array.isArray(pItems)) {
+        phimapiHits = pItems.map(m => ({
+          name: m.name || '',
+          origin_name: m.origin_name || '',
+          slug: m.slug,
+          year: m.year || '',
+          thumb_url: m.thumb_url ? (m.thumb_url.startsWith('http') ? m.thumb_url : `https://phimimg.com/${m.thumb_url}`) : '',
+          poster_url: m.poster_url ? (m.poster_url.startsWith('http') ? m.poster_url : `https://phimimg.com/${m.poster_url}`) : '',
+          quality: 'HD',
+          lang: 'Vietsub',
+          episode_current: m.episode_current || '',
+          _liveSource: 'phimapi'
+        }));
+      }
+    }
+
+    const seen = new Set();
+    const allRows = [];
+    for (const m of [...localHits, ...supabaseRes.rows, ...vsmovHits, ...phimapiHits]) {
+      if (m && m.slug && !seen.has(m.slug)) {
+        seen.add(m.slug);
+        allRows.push(m);
+      }
+    }
+
+    const totalCount = Math.max(allRows.length, (supabaseRes.total || 0) + localHits.length);
+    box.innerHTML = `<p class="count">${totalCount ? `${num(totalCount)} kết quả ${supabaseRes.totalPages > 1 ? `· trang ${page}/${supabaseRes.totalPages}` : ''}` : 'Không có kết quả'}</p>
       <section class="section">${allRows.length ? gridHtml(allRows) : emptyBox('Không tìm thấy phim phù hợp.')}</section>
-      ${pager(page, res.totalPages, p => `/tim-kiem?${qs}${qs ? '&' : ''}page=${p}`)}`;
+      ${supabaseRes.totalPages > 1 ? pager(page, supabaseRes.totalPages, p => `/tim-kiem?${qs}${qs ? '&' : ''}page=${p}`) : ''}`;
   } catch (e) {
     box.innerHTML = emptyBox('Lỗi: ' + e.message);
   }
