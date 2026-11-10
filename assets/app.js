@@ -712,6 +712,13 @@ async function loadMovie(slug) {
     if (l) { mem.set(ck, l); return l; }
     return null;
   };
+
+  /* Tự động tìm nguồn phát sống (VSMOV / Vietsub) ngay khi tải */
+  const firstPlayable = seek(cur.sv, cur.ep) || seek(0, 0);
+  if (firstPlayable) {
+    cur.sv = firstPlayable.s;
+    cur.ep = firstPlayable.e;
+  }
   if (!movie) {
     const l = localHit();
     if (l) return l;
@@ -1169,11 +1176,6 @@ function mountEpisodes(movie, servers, state) {
   }
 
   const cur = { sv: state.sv, ep: state.ep };
-  const firstPlayable = seek(cur.sv, cur.ep) || seek(0, 0);
-  if (firstPlayable) {
-    cur.sv = firstPlayable.s;
-    cur.ep = firstPlayable.e;
-  }
 
   const srcOf = e => (e && (e.embed || e.m3u8 || e.link)) || '';
   const retrying = () => retryOverride.slug === movie.slug && Date.now() < retryOverride.until;
