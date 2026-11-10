@@ -494,7 +494,7 @@ async function renderHome() {
     episode_current: 'Hoàn Tất (1/1)',
     content: 'Dàn diễn viên ngôi sao của loạt phim truyền hình ăn khách chính thức hội tụ trong bản điện ảnh đỉnh cao của Doctor-X! Nữ bác sĩ ngoại khoa tự do thiên tài Daimon Michiko (Ryoko Yonekura) bước vào ca phẫu thuật hiểm nghèo chưa từng có tiền lệ: "Tôi không bao giờ thất bại!".',
     poster_url: 'https://phimimg.com/uploads/movies/20260806/bac-si-x-phim-dien-anh-poster.webp',
-    hero_backdrop_url: 'https://phimimg.com/uploads/movies/20260806/bac-si-x-phim-dien-anh-thumb.webp',
+    hero_backdrop_url: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1600&q=80',
     thumb_url: 'https://phimimg.com/uploads/movies/20260806/bac-si-x-phim-dien-anh-thumb.webp',
     category: [{ name: 'Y Khoa' }, { name: 'Chính Kịch' }, { name: 'Điện Ảnh Chiếu Rạp' }]
   };
@@ -2038,9 +2038,9 @@ function bindHeader() {
 
 bindHeader();
 buildMenus();
-addEventListener('popstate', () => { route(); setTimeout(initLiquidGlass, 80); });
+addEventListener('popstate', () => { route(); setTimeout(initCinemaUI, 80); });
 route();
-setTimeout(initLiquidGlass, 150);
+setTimeout(initCinemaUI, 150);
 
 /* kiểm tra tập mới của phim đang theo dõi (một lần mỗi phiên) */
 if (followedMovies().length) setTimeout(() => { checkFollowedEpisodes(); }, 1200);
@@ -2138,23 +2138,24 @@ function initCinemaUI() {
     });
   }
 
-  // 2. NÚT 3 CHẤM MENU TIỆN ÍCH MỞ RỘNG
+  // 2. NÚT 3 CHẤM MENU TIỆN ÍCH MỞ RỘNG (CLICK BẤT KỲ ĐÂU ĐỀU MỞ)
   const originMorphIsland = document.getElementById('originMorphIsland');
-  const morphDotsTrigger = document.getElementById('morphDotsTrigger');
-  const morphCloseBtn = document.getElementById('morphCloseBtn');
-
   if (originMorphIsland && !originMorphIsland._bound) {
     originMorphIsland._bound = true;
 
-    const toggleMenu = (e) => {
+    originMorphIsland.addEventListener('click', (e) => {
+      if (e.target.closest('#morphCloseBtn')) {
+        e.stopPropagation();
+        originMorphIsland.classList.remove('expanded');
+        return;
+      }
+      if (e.target.closest('.popover-item')) {
+        // Cho phép click vào link chuyển trang, đóng menu
+        originMorphIsland.classList.remove('expanded');
+        return;
+      }
       e.stopPropagation();
       originMorphIsland.classList.toggle('expanded');
-    };
-
-    morphDotsTrigger?.addEventListener('click', toggleMenu);
-    morphCloseBtn?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      originMorphIsland.classList.remove('expanded');
     });
 
     document.addEventListener('click', (e) => {
