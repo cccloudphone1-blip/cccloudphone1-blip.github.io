@@ -697,6 +697,83 @@ function renderList(kind, slug, page) {
 }
 
 /* ---------------- movie data ---------------- */
+/* ---------------- Cứu nguồn Live từ PhimAPI + Nguồn C ---------------- */
+async function fetchLiveStreams(slug) {
+  const liveServers = [];
+  const p1 = (async () => {
+    try {
+      const res = await fetch(`https://phimapi.com/phim/${encodeURIComponent(slug)}`, {
+        headers: { accept: 'application/json' },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.status && Array.isArray(json?.episodes)) {
+          for (const s of json.episodes) {
+            const rawName = (s.server_name || 'Vietsub').trim();
+            const serverName = `PhimAPI · ${rawName}`;
+            const eps = (s.server_data || []).map((e, idx) => {
+              const embed = e.link_embed || '';
+              const m3u8 = e.link_m3u8 || '';
+              const link = m3u8 || embed;
+              const num = Number(e.slug || e.name || idx + 1) || (idx + 1);
+              return {
+                num,
+                name: e.name ? (String(e.name).toLowerCase().startsWith('tập') ? e.name : 'Tập ' + e.name) : 'Tập ' + num,
+                link, embed, m3u8,
+              };
+            }).filter(e => e.link);
+            if (eps.length) {
+              liveServers.push({
+                name: serverName,
+                audio: /thuyết minh/i.test(serverName) ? 'Thuyết minh' : 'Vietsub',
+                eps,
+              });
+            }
+          }
+        }
+      }
+    } catch {}
+  })();
+
+  const p2 = (async () => {
+    try {
+      const resC = await fetch(`https://phim.nguonc.com/api/film/${encodeURIComponent(slug)}`, {
+        headers: { accept: 'application/json' },
+      });
+      if (resC.ok) {
+        const jsonC = await resC.json();
+        if (jsonC?.status === 'success' && Array.isArray(jsonC?.movie?.episodes)) {
+          for (const s of jsonC.movie.episodes) {
+            const rawName = (s.server_name || 'Vietsub').trim();
+            const serverName = `Nguồn C · ${rawName}`;
+            const eps = (s.items || []).map((e, idx) => {
+              const embed = e.embed || '';
+              const m3u8 = e.m3u8 || '';
+              const link = embed || m3u8;
+              const num = Number(e.name || idx + 1) || (idx + 1);
+              return {
+                num,
+                name: e.name ? (String(e.name).toLowerCase().startsWith('tập') ? e.name : 'Tập ' + e.name) : 'Tập ' + num,
+                link, embed, m3u8,
+              };
+            }).filter(e => e.link);
+            if (eps.length) {
+              liveServers.push({
+                name: serverName,
+                audio: /thuyết minh/i.test(serverName) ? 'Thuyết minh' : 'Vietsub',
+                eps,
+              });
+            }
+          }
+        }
+      }
+    } catch {}
+  })();
+
+  await Promise.allSettled([p1, p2]);
+  return liveServers;
+}
+
 async function loadMovie(slug) {
   const ck = 'mv:' + slug;
   if (mem.has(ck)) return mem.get(ck);
@@ -774,6 +851,17 @@ async function loadMovie(slug) {
       if (s.eps.length) list.push({ ...s, eps: s.eps.sort((a, b) => a.num - b.num) });
     }
   } catch {}
+
+  /* Tự động cứu nguồn thời gian thực nếu database không có tập nào hoặc tất cả server đều chết */
+  const hasPlayable = list.some(s => s.eps.some(e => !isDead(e.embed || e.m3u8 || e.link)));
+  if (!hasPlayable || list.length === 0) {
+    try {
+      const liveList = await fetchLiveStreams(slug);
+      if (liveList && liveList.length) {
+        list.push(...liveList);
+      }
+    } catch {}
+  }
 
   list.sort((a, b) => {
     const aDead = (a.eps[0] && isDead(a.eps[0].embed || a.eps[0].m3u8 || a.eps[0].link)) ? 1 : 0;
@@ -1046,7 +1134,7 @@ async function renderWatch(slug, params) {
 /* nguồn bị chặn theo vùng: lưu localStorage, tự học khi phát lỗi */
 const DEAD_KEY = 'kp_dead_hosts';
 /* nguồn trả 404/CORS khi IP ngoài VN hoặc CDN chết — a.kvp726.com trả 404 hàng loạt */
-const DEAD_SEED = ['a.kvp726.com', 'kkphimplayer7.com', 'v7.kkphimplayer7.com'];
+const DEAD_SEED = ['kkphimplayer7.com', 'v7.kkphimplayer7.com'];
 /* nguồn chặn nhúng iframe (X-Frame-Options / 403) */
 const NOFRAME = ['streamc.xyz', 'dailymotion.com', 'short.icu'];
 const DEAD_TTL = 6 * 3600 * 1000;
@@ -1305,10 +1393,32 @@ function mountEpisodes(movie, servers, state) {
         if (hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`)) {
           return;
         }
-        const wrap = 'https://player.phimapi.com/player/?url=' + encodeURIComponent(item.m3u8);
-        playerBox.innerHTML = `<iframe src="${esc(wrap)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
-        mountPlayerCtl(null, item);
-        notice('Không phát trực tiếp được — đang dùng player nhúng dự phòng.');
+        notice('Đang tìm nguồn phát trực tiếp thay thế...');
+        fetchLiveStreams(movie.slug).then(liveList => {
+          if (liveList && liveList.length) {
+            const known = new Set(servers.map(s => s.name.toLowerCase()));
+            let added = false;
+            for (const ls of liveList) {
+              if (!known.has(ls.name.toLowerCase())) {
+                servers.push(ls);
+                added = true;
+              }
+            }
+            if (added) {
+              const p = seek(cur.sv + 1, 0) || seek(0, 0);
+              if (p) {
+                cur.sv = p.s; cur.ep = p.e;
+                sync(); render();
+                notice('Đã tự động nạp máy chủ phát dự phòng trực tiếp.');
+                return;
+              }
+            }
+          }
+          const wrap = 'https://player.phimapi.com/player/?url=' + encodeURIComponent(item.m3u8);
+          playerBox.innerHTML = `<iframe src="${esc(wrap)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
+          mountPlayerCtl(null, item);
+          notice('Không phát trực tiếp được — đang dùng player nhúng dự phòng.');
+        });
       }, () => markAlive(item.m3u8));
     } else {
       playerBox.innerHTML = `<iframe src="${esc(src)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
