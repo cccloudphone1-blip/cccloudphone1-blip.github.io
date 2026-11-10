@@ -713,12 +713,7 @@ async function loadMovie(slug) {
     return null;
   };
 
-  /* Tự động tìm nguồn phát sống (VSMOV / Vietsub) ngay khi tải */
-  const firstPlayable = seek(cur.sv, cur.ep) || seek(0, 0);
-  if (firstPlayable) {
-    cur.sv = firstPlayable.s;
-    cur.ep = firstPlayable.e;
-  }
+
   if (!movie) {
     const l = localHit();
     if (l) return l;
@@ -784,8 +779,10 @@ async function loadMovie(slug) {
     const aDead = (a.eps[0] && isDead(a.eps[0].embed || a.eps[0].m3u8 || a.eps[0].link)) ? 1 : 0;
     const bDead = (b.eps[0] && isDead(b.eps[0].embed || b.eps[0].m3u8 || b.eps[0].link)) ? 1 : 0;
     if (aDead !== bDead) return aDead - bDead;
-    const scoreA = (/vsmov/i.test(a.name) ? 20 : 0) + (/thuyết minh/i.test(a.audio + a.name) ? 5 : 0);
-    const scoreB = (/vsmov/i.test(b.name) ? 20 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0);
+    const isVsmovA = /vsmov/i.test(a.name) || (a.eps[0] && /vsmov/i.test(a.eps[0].embed || a.eps[0].link || ''));
+    const isVsmovB = /vsmov/i.test(b.name) || (b.eps[0] && /vsmov/i.test(b.eps[0].embed || b.eps[0].link || ''));
+    const scoreA = (isVsmovA ? 60 : 0) + (/vietsub/i.test(a.name) ? 15 : 0) + (/thuyết minh/i.test(a.audio + a.name) ? 5 : 0);
+    const scoreB = (isVsmovB ? 60 : 0) + (/vietsub/i.test(b.name) ? 15 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0);
     return scoreB - scoreA || b.eps.length - a.eps.length;
   });
 
@@ -1286,16 +1283,14 @@ function mountEpisodes(movie, servers, state) {
       }
       mountPlayerCtl(vid, item);
       attachHls(vid, item.m3u8, () => {
-        /* phát trực tiếp lỗi → thử player nhúng, rồi mới nhảy nguồn */
-        const wrap = 'https://player.phimapi.com/player/?url=' + encodeURIComponent(item.m3u8);
-        if (!isDead(wrap)) {
-          playerBox.innerHTML = `<iframe src="${esc(wrap)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
-          mountPlayerCtl(null, item);
-          notice('Không phát trực tiếp được — đã chuyển sang player nhúng.');
+        markDead(item.m3u8);
+        if (hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`)) {
           return;
         }
-        markDead(item.m3u8);
-        hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> lỗi — đã chuyển nguồn khác.`);
+        const wrap = 'https://player.phimapi.com/player/?url=' + encodeURIComponent(item.m3u8);
+        playerBox.innerHTML = `<iframe src="${esc(wrap)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
+        mountPlayerCtl(null, item);
+        notice('Không phát trực tiếp được — đang dùng player nhúng dự phòng.');
       }, () => markAlive(item.m3u8));
     } else {
       playerBox.innerHTML = `<iframe src="${esc(src)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
