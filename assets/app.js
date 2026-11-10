@@ -484,19 +484,19 @@ async function renderHome() {
 
   const hero = document.getElementById('hero');
   const doctorXFeatured = {
-    name: 'Bác Sĩ X: Phim Điện Ảnh',
-    origin_name: 'Doctor X: The Movie Final',
-    slug: 'bac-si-x-phim-dien-anh',
-    year: 2024,
+    name: 'Bác Sĩ X',
+    origin_name: 'Doctor X: Mafia in White',
+    slug: 'bac-si-x',
+    year: 2026,
     quality: 'FHD',
-    lang: 'Vietsub',
+    lang: 'Vietsub VSMOV',
     rate: 9.8,
-    episode_current: 'Hoàn Tất (1/1)',
-    content: 'Dàn diễn viên ngôi sao của loạt phim truyền hình ăn khách chính thức hội tụ trong bản điện ảnh đỉnh cao của Doctor-X! Nữ bác sĩ ngoại khoa tự do thiên tài Daimon Michiko (Ryoko Yonekura) bước vào ca phẫu thuật hiểm nghèo chưa từng có tiền lệ: "Tôi không bao giờ thất bại!".',
-    poster_url: 'https://phimimg.com/uploads/movies/20260806/bac-si-x-phim-dien-anh-poster.webp',
+    episode_current: 'Trọn Bộ 10 Tập',
+    content: 'Daimon Michiko – nữ bác sĩ ngoại khoa tự do thiên tài với tuyên ngôn bất hủ "Tôi không bao giờ thất bại!". Đối đầu viện trưởng mới và các âm mưu đen tối trong giới y khoa cấp cao.',
+    poster_url: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&w=800&q=80',
     hero_backdrop_url: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1600&q=80',
-    thumb_url: 'https://phimimg.com/uploads/movies/20260806/bac-si-x-phim-dien-anh-thumb.webp',
-    category: [{ name: 'Y Khoa' }, { name: 'Chính Kịch' }, { name: 'Điện Ảnh Chiếu Rạp' }]
+    thumb_url: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&w=800&q=80',
+    category: [{ name: 'Y Khoa' }, { name: 'Chính Kịch' }, { name: 'Chiếu Rạp' }]
   };
   const pool = [doctorXFeatured, ...rows(latest).slice(0, 5)];
   if (hero && pool.length) {
@@ -777,9 +777,9 @@ async function loadMovie(slug) {
     const aDead = (a.eps[0] && isDead(a.eps[0].embed || a.eps[0].m3u8 || a.eps[0].link)) ? 1 : 0;
     const bDead = (b.eps[0] && isDead(b.eps[0].embed || b.eps[0].m3u8 || b.eps[0].link)) ? 1 : 0;
     if (aDead !== bDead) return aDead - bDead;
-    const av = /thuyết minh|vsmov/i.test(a.audio + a.name) ? 1 : 0;
-    const bv = /thuyết minh|vsmov/i.test(b.audio + b.name) ? 1 : 0;
-    return bv - av || b.eps.length - a.eps.length;
+    const scoreA = (/vsmov/i.test(a.name) ? 20 : 0) + (/thuyết minh/i.test(a.audio + a.name) ? 5 : 0);
+    const scoreB = (/vsmov/i.test(b.name) ? 20 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0);
+    return scoreB - scoreA || b.eps.length - a.eps.length;
   });
 
   const out = { movie, servers: list };
@@ -1042,7 +1042,7 @@ async function renderWatch(slug, params) {
 /* nguồn bị chặn theo vùng: lưu localStorage, tự học khi phát lỗi */
 const DEAD_KEY = 'kp_dead_hosts';
 /* nguồn trả 404/CORS khi IP ngoài VN hoặc CDN chết — a.kvp726.com trả 404 hàng loạt */
-const DEAD_SEED = ['a.kvp726.com'];
+const DEAD_SEED = ['a.kvp726.com', 'kkphimplayer7.com', 'v7.kkphimplayer7.com'];
 /* nguồn chặn nhúng iframe (X-Frame-Options / 403) */
 const NOFRAME = ['streamc.xyz', 'dailymotion.com', 'short.icu'];
 const DEAD_TTL = 6 * 3600 * 1000;
@@ -1169,6 +1169,11 @@ function mountEpisodes(movie, servers, state) {
   }
 
   const cur = { sv: state.sv, ep: state.ep };
+  const firstPlayable = seek(cur.sv, cur.ep) || seek(0, 0);
+  if (firstPlayable) {
+    cur.sv = firstPlayable.s;
+    cur.ep = firstPlayable.e;
+  }
 
   const srcOf = e => (e && (e.embed || e.m3u8 || e.link)) || '';
   const retrying = () => retryOverride.slug === movie.slug && Date.now() < retryOverride.until;
