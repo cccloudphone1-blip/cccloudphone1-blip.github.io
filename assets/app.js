@@ -1103,6 +1103,9 @@ function mountPlayerCtl(video, item) {
     ${item && item.sub ? `<label>Phụ đề
       <select data-ctl="sub"><option value="off">Tắt</option><option value="on">Vietsub</option></select>
     </label>` : ''}
+    ${video ? `<label>Chất lượng
+      <select data-ctl="quality"><option value="-1" selected>Auto</option></select>
+    </label>` : ''}
     <button type="button" data-ctl="pip">Ảnh trong ảnh</button>
     ${video ? '' : '<small class="pctl__hint">Nguồn nhúng — tốc độ/phụ đề do player bên kia quản lý</small>'}`;
   host.appendChild(bar);
@@ -1111,6 +1114,11 @@ function mountPlayerCtl(video, item) {
   const speed = bar.querySelector('[data-ctl="speed"]');
   speed.addEventListener('change', () => {
     try { video.playbackRate = Number(speed.value); } catch {}
+  });
+
+  const quality = bar.querySelector('[data-ctl="quality"]');
+  if (quality) quality.addEventListener('change', () => {
+    try { const h = video._hls; if (h) h.nextLevel = Number(quality.value); } catch {}
   });
 
   const pip = bar.querySelector('[data-ctl="pip"]');
@@ -1151,7 +1159,17 @@ async function attachHls(video, src, onFail, onOk) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
       hls.loadSource(src);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, ok);
+      hls.on(Hls.Events.MANIFEST_PARSED, (_e, _data) => {
+        ok();
+        try {
+          const sel = document.querySelector('.pctl [data-ctl="quality"]');
+          if (sel && hls.levels && hls.levels.length > 1) {
+            const seen = new Set();
+            const opts = hls.levels.map((lv, i) => ({ i, h: lv.height || 0 })).filter(x => x.h && !seen.has(x.h) && seen.add(x.h)).sort((a, b) => b.h - a.h);
+            if (opts.length > 1) sel.innerHTML = '<option value="-1" selected>Auto</option>' + opts.map(o => `<option value="${o.i}">${o.h}p</option>`).join('');
+          }
+        } catch {}
+      });
       hls.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) fallback(); });
       video._hls = hls;
       return;
