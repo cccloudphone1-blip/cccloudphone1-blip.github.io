@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>h0syh0aπg Cinema – Xem Phim 4K Vietsub & Thuyết Minh Miễn Phí</title>
+<meta name="description" content="h0syh0aπg Cinema – Kho phim bộ, phim lẻ, phim chiếu rạp và anime 4K Vietsub, Thuyết minh chất lượng cao tốc độ nhanh.">
+<meta name="theme-color" content="#03060d">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<link rel="icon" type="image/png" sizes="48x48" href="/brand/khophim-favicon-v2-48.png">
+<link rel="icon" type="image/png" sizes="96x96" href="/brand/khophim-favicon-v2-96.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/brand/khophim-apple-touch-v2.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preconnect" href="https://phimapi.com">
+<link rel="preconnect" href="https://phimimg.com">
+<link rel="preconnect" href="https://ceoxbhsdodllziyxmbqr.supabase.co">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<div class="cinema-backdrop"></div>
+
+<!-- HEADER h0syh0aπg CINEMA -->
+<header class="header" id="nav">
+  <a href="/" class="brand-pill ios27-glass">
+    <span class="brand-orb">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+        <path d="M8 5.14v14l11-7-11-7z"/>
+      </svg>
+    </span>
+    <span>h<span class="brand-zero">0</span>syh<span class="brand-zero">0</span>a<span class="pi-as-n" title="Chữ n cách điệu bằng ký hiệu Pi">π</span>g</span>
+  </a>
+
+  <nav class="ios27-tabbar ios27-glass" id="ios27TabBar">
+    <div class="tab-water-droplet" id="tabWaterDroplet"></div>
+    <a href="/" class="tab-btn active" data-cat="all">Khám Phá</a>
+    <a href="/danh-sach/phim-bo" class="tab-btn" data-cat="series">Phim Bộ</a>
+    <a href="/danh-sach/phim-le" class="tab-btn" data-cat="single">Phim Lẻ</a>
+    <a href="/danh-sach/phim-chieu-rap" class="tab-btn" data-cat="cinema">Chiếu Rạp</a>
+    <a href="/danh-sach/hoat-hinh" class="tab-btn" data-cat="anime">Anime 4K</a>
+  </nav>
+
+  <div class="header-actions">
+    <!-- KHUNG TÌM KIẾM NHANH PHIM -->
+    <form class="header-search-wrap ios27-glass search" id="searchForm" autocomplete="off">
+      <svg class="header-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <input type="text" class="header-search-input" id="searchInput" placeholder="Tìm phim, anime, diễn viên..." autocomplete="off">
+      <div class="suggest" id="suggest" hidden></div>
+    </form>
+
+    <!-- NÚT 3 CHẤM MENU TIỆN ÍCH PHIM -->
+    <div class="origin-menu-wrapper">
+      <div class="origin-morph-island" id="originMorphIsland">
+        <div class="morph-dots-layer" id="morphDotsTrigger" title="Danh mục mở rộng">
+          <span class="dot-pip"></span>
+          <span class="dot-pip"></span>
+          <span class="dot-pip"></span>
+        </div>
+
+        <div class="morph-content-body">
+          <div class="morph-header">
+            <span class="morph-header-title">
+              <span>🎬 Danh Mục Mở Rộng</span>
+            </span>
+            <button class="morph-close-btn" id="morphCloseBtn" type="button" title="Đóng">✕</button>
+          </div>
+          <a href="/danh-sach/phim-chieu-rap" class="popover-item">
+            <span>🍿 Phim Chiếu Rạp Mới</span>
+          </a>
+          <a href="/phim-hay" class="popover-item">
+            <span>🏆 Bảng Xếp Hạng Top 10</span>
+          </a>
+          <a href="/danh-sach/phim-bo" class="popover-item">
+            <span>📺 Phim Bộ Đang Hot</span>
+          </a>
+          <a href="/danh-sach/hoat-hinh" class="popover-item">
+            <span>⚡ Anime 4K Tuyển Chọn</span>
+          </a>
+          <a href="/yeu-thich" class="popover-item">
+            <span>⭐ Phim Yêu Thích Của Bạn</span>
+          </a>
+          <a href="/lich-su" class="popover-item">
+            <span>🕒 Lịch Sử Đã Xem</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div id="kp-banner" class="strip" hidden></div>
+<div id="kp-notif" class="strip strip--notif" hidden></div>
+
+<main id="app">
+  <div class="boot"><div class="boot__spin"></div><p>Đang tải rạp phim...</p></div>
+</main>
+
+<!-- FOOTER CHUẨN RẠP PHIM CAO CẤP -->
+<footer class="cinema-footer ios27-glass foot">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <div class="brand-pill" style="padding: 0; pointer-events: none;">
+        <span>h<span class="brand-zero">0</span>syh<span class="brand-zero">0</span>a<span class="pi-as-n">π</span>g</span>
+        <span style="font-size: 13px; margin-left: 6px; color: var(--accent-cyan); font-weight: 700;">CINEMA</span>
+      </div>
+      <p style="font-size: 13px; color: var(--text-sub); line-height: 1.6; margin-top: 10px; max-width: 380px;">
+        Nền tảng xem phim trực tuyến chất lượng cao với hơn 27,000 bộ phim bom tấn, phim bộ, phim lẻ và anime 4K Vietsub, Thuyết minh tốc độ cao.
+      </p>
+    </div>
+    <div class="footer-col">
+      <span class="footer-title">DANH MỤC PHIM</span>
+      <div class="footer-links">
+        <a href="/danh-sach/phim-chieu-rap">Phim Chiếu Rạp Mới</a>
+        <a href="/danh-sach/phim-bo">Phim Bộ Đang Hot</a>
+        <a href="/danh-sach/hoat-hinh">Anime 4K Tuyển Chọn</a>
+        <a href="/danh-sach/phim-le">Phim Lẻ Hay Nhất</a>
+      </div>
+    </div>
+    <div class="footer-col">
+      <span class="footer-title">HẠ TẦNG KỸ THUẬT</span>
+      <div class="footer-links">
+        <span>⚡ Máy chủ: CDN Tốc Độ Cao</span>
+        <span>💾 Thư viện: Hơn 27,000 Phim</span>
+        <span>🔊 Âm thanh: Vietsub & Thuyết Minh</span>
+        <span>🛡️ Bản quyền: h0syh0aπg © 2026</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script type="module" src="/assets/app.js"></script>
+</body>
+</html>
