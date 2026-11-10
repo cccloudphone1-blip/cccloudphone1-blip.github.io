@@ -697,10 +697,140 @@ function renderList(kind, slug, page) {
 }
 
 /* ---------------- movie data ---------------- */
-/* ---------------- Cứu nguồn Live từ PhimAPI + Nguồn C ---------------- */
+/* ---------------- Cứu nguồn Live từ VSMOV + PhimAPI + Nguồn C ---------------- */
+async function fetchVsmovMovie(slug) {
+  try {
+    const res = await fetch(`https://vsmov.com/api/phim/${encodeURIComponent(slug)}`, {
+      headers: { accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json?.status || !json?.movie) return null;
+    const m = json.movie;
+    const movie = {
+      id: m._id || m.id || slug,
+      slug: m.slug || slug,
+      name: m.name || slug,
+      origin_name: m.origin_name || '',
+      year: m.year || '',
+      type: m.type || 'single',
+      quality: m.quality || 'FHD',
+      lang: m.lang || 'Vietsub',
+      episode_current: m.episode_current || '',
+      content: m.content || '',
+      poster_url: m.poster_url || '',
+      thumb_url: m.thumb_url || '',
+      category: m.category || [],
+      country: m.country || [],
+      actor: m.actor || [],
+      director: m.director || [],
+      tmdb_vote_average: m.tmdb?.vote_average || 0,
+      _vsmovLive: true,
+    };
+    const servers = [];
+    if (Array.isArray(json.episodes)) {
+      for (const s of json.episodes) {
+        const rawName = (s.server_name || 'Vietsub').trim().replace(/[\r\n\t]+/g, ' ');
+        const serverName = /vsmov/i.test(rawName) ? rawName : `VSMOV · ${rawName}`;
+        const eps = (s.server_data || []).map((e, idx) => {
+          const embed = e.link_embed || '';
+          const m3u8 = e.link_m3u8 || '';
+          const link = embed || m3u8;
+          const num = Number(String(e.slug || '').replace(/\D+/g, '') || e.name || idx + 1) || (idx + 1);
+          return {
+            num,
+            name: e.name ? (String(e.name).toLowerCase().startsWith('tập') ? e.name : 'Tập ' + e.name) : 'Tập ' + num,
+            link, embed, m3u8,
+          };
+        }).filter(e => e.link);
+        if (eps.length) {
+          servers.push({
+            name: serverName,
+            audio: /thuyết minh/i.test(serverName) ? 'Thuyết minh' : 'Vietsub',
+            eps,
+          });
+        }
+      }
+    }
+    return { movie, servers };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchPhimapiMovie(slug) {
+  try {
+    const res = await fetch(`https://phimapi.com/phim/${encodeURIComponent(slug)}`, {
+      headers: { accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json?.status || !json?.movie) return null;
+    const m = json.movie;
+    const movie = {
+      id: m._id || m.id || slug,
+      slug: m.slug || slug,
+      name: m.name || slug,
+      origin_name: m.origin_name || '',
+      year: m.year || '',
+      type: m.type || 'single',
+      quality: m.quality || 'FHD',
+      lang: m.lang || 'Vietsub',
+      episode_current: m.episode_current || '',
+      content: m.content || '',
+      poster_url: phimImg(m.poster_url),
+      thumb_url: phimImg(m.thumb_url),
+      category: m.category || [],
+      country: m.country || [],
+      actor: m.actor || [],
+      director: m.director || [],
+      tmdb_vote_average: m.tmdb?.vote_average || 0,
+      _phimapiLive: true,
+    };
+    const servers = [];
+    if (Array.isArray(json.episodes)) {
+      for (const s of json.episodes) {
+        const rawName = (s.server_name || 'Vietsub').trim();
+        const serverName = `PhimAPI · ${rawName}`;
+        const eps = (s.server_data || []).map((e, idx) => {
+          const embed = e.link_embed || '';
+          const m3u8 = e.link_m3u8 || '';
+          const link = m3u8 || embed;
+          const num = Number(e.slug || e.name || idx + 1) || (idx + 1);
+          return {
+            num,
+            name: e.name ? (String(e.name).toLowerCase().startsWith('tập') ? e.name : 'Tập ' + e.name) : 'Tập ' + num,
+            link, embed, m3u8,
+          };
+        }).filter(e => e.link);
+        if (eps.length) {
+          servers.push({
+            name: serverName,
+            audio: /thuyết minh/i.test(serverName) ? 'Thuyết minh' : 'Vietsub',
+            eps,
+          });
+        }
+      }
+    }
+    return { movie, servers };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchLiveStreams(slug) {
   const liveServers = [];
-  const p1 = (async () => {
+
+  /* Ưu tiên 1: VSMOV API Live */
+  const pVsmov = (async () => {
+    try {
+      const v = await fetchVsmovMovie(slug);
+      if (v?.servers?.length) liveServers.push(...v.servers);
+    } catch {}
+  })();
+
+  /* Ưu tiên 2: PhimAPI Live */
+  const pPhimapi = (async () => {
     try {
       const res = await fetch(`https://phimapi.com/phim/${encodeURIComponent(slug)}`, {
         headers: { accept: 'application/json' },
@@ -735,7 +865,8 @@ async function fetchLiveStreams(slug) {
     } catch {}
   })();
 
-  const p2 = (async () => {
+  /* Ưu tiên 3: Nguồn C Live */
+  const pNguonC = (async () => {
     try {
       const resC = await fetch(`https://phim.nguonc.com/api/film/${encodeURIComponent(slug)}`, {
         headers: { accept: 'application/json' },
@@ -770,7 +901,7 @@ async function fetchLiveStreams(slug) {
     } catch {}
   })();
 
-  await Promise.allSettled([p1, p2]);
+  await Promise.allSettled([pVsmov, pPhimapi, pNguonC]);
   return liveServers;
 }
 
@@ -794,6 +925,21 @@ async function loadMovie(slug) {
   if (!movie) {
     const l = localHit();
     if (l) return l;
+
+    /* CỨU CÁNH VSMOV TRỰC TIẾP: Nếu Supabase không có phim, thử ngay API của VSMOV */
+    const vsmovData = await fetchVsmovMovie(slug);
+    if (vsmovData && vsmovData.servers.length) {
+      mem.set(ck, vsmovData);
+      return vsmovData;
+    }
+
+    /* Nếu VSMOV không có, thử tiếp PhimAPI */
+    const phimapiData = await fetchPhimapiMovie(slug);
+    if (phimapiData && phimapiData.servers.length) {
+      mem.set(ck, phimapiData);
+      return phimapiData;
+    }
+
     throw new Error('not found');
   }
   const { rows: eps } = await api('movie_episodes', {
