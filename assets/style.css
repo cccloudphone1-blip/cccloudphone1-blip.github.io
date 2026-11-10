@@ -394,7 +394,7 @@ input{font:inherit}
       -webkit-mask-image: radial-gradient(circle at 50% 45%, black 40%, transparent 92%);
     }
 
-    .Cinema-glass {
+    .Cinema-glass, .ios27-glass {
       background: linear-gradient(
         135deg,
         rgba(255, 255, 255, 0.18) 0%,
@@ -475,7 +475,7 @@ input{font:inherit}
       transform: translateY(0.5px);
     }
 
-    .Cinema-tabbar {
+    .Cinema-tabbar, .ios27-tabbar {
       position: relative;
       display: inline-flex;
       align-items: center;
