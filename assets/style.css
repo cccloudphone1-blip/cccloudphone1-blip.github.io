@@ -1517,3 +1517,29 @@ input{font:inherit}
   font-size: 12px;
   padding-left: 2px;
 }
+
+/* ---------- QA 2026-11-11: mobile header/logo (was breaking at ~500px) ---------- */
+/* The header is a single flex row (brand pill + 5-6 tab buttons + search +
+   3-dot menu) with fixed widths — at phone widths it overflowed, the brand
+   text wrapped mid-word ("h0syh0a / πg") and "Phim Lẻ" was cut off. */
+@media (max-width: 640px) {
+  .header { flex-wrap: wrap; gap: 8px; padding: 0 12px; top: 8px; }
+  .brand-pill { font-size: 16px; padding: 8px 12px 8px 8px; gap: 8px; flex: 0 1 auto; min-width: 0; max-width: 62vw; white-space: nowrap; overflow: hidden; }
+  .brand-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brand-orb { width: 28px; height: 28px; flex: 0 0 auto; }
+  .ios27-tabbar { order: 3; flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; }
+  .ios27-tabbar::-webkit-scrollbar { display: none; }
+  .tab-btn { padding: 7px 12px; font-size: 13px; flex: 0 0 auto; }
+  .header-actions { flex: 1 1 auto; min-width: 0; gap: 8px; }
+  .header-search-wrap { flex: 1 1 auto; min-width: 0; width: auto; height: 42px; }
+  .header-search-wrap:focus-within { width: auto; }
+  .origin-menu-wrapper { width: 42px; height: 42px; }
+  .origin-morph-island { width: 42px; height: 42px; }
+  .origin-morph-island.expanded { width: min(295px, calc(100vw - 24px)); }
+  .watch__head h1, .detail__body h1 { overflow-wrap: anywhere; word-break: break-word; }
+  .watch__head { padding: 20px 14px 0; }
+}
+/* Blog list must never render as an empty strip: keep cards visible even
+   while their (async) content is still loading. */
+#blogList { min-height: 200px; }
+.blogcard { min-height: 120px; }
