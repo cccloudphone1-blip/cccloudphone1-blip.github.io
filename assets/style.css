@@ -1518,6 +1518,29 @@ input{font:inherit}
   padding-left: 2px;
 }
 
+/* ---------- QA 2026-11-11: rotation zoom fix ----------
+   Xoay ngang -> dọc xong trang bị "phóng ra", phải thu nhỏ lại bằng tay.
+   Nguyên nhân phía web: header là 1 hàng flex không wrap (brand ~195px +
+   tab bar 6 tab ~585px + ô tìm kiếm 240px + nút menu 48px + gap/padding
+   ~80px = ~1160px), trong khi các rule wrap/cuộn tab bar và
+   html{overflow-x:hidden} chỉ áp dụng ở <=640px. Điện thoại xoay ngang
+   rộng ~700-950px nên header tràn ngang ở đó, Chrome giữ lại layout
+   viewport đã nở rộng khi xoay về dọc -> trang hiển thị bị phóng to.
+   Sửa: (1) html overflow-x:hidden ở MỌI chiều rộng — KHÔNG khóa pinch-zoom
+   (không dùng maximum-scale/user-scalable=no), (2) cho header wrap dưới
+   1180px để không còn gì tràn ở bất kỳ chiều rộng nào. Player iframe
+   (.player__box aspect-ratio 16/9, iframe width/height 100%) vốn đã vừa
+   khung nên không cần sửa. */
+html { overflow-x: hidden; }
+@media (max-width: 1180px) {
+  .header { flex-wrap: wrap; gap: 10px; }
+  .ios27-tabbar { order: 3; flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; }
+  .ios27-tabbar::-webkit-scrollbar { display: none; }
+  .header-actions { flex: 1 1 auto; min-width: 0; }
+  .header-search-wrap { flex: 1 1 auto; min-width: 0; width: auto; }
+  .header-search-wrap:focus-within { width: auto; }
+}
+
 /* ---------- QA 2026-11-11: mobile header/logo (was breaking at ~500px) ---------- */
 /* The header is a single flex row (brand pill + 5-6 tab buttons + search +
    3-dot menu) with fixed widths — at phone widths it overflowed, the brand
@@ -1542,7 +1565,8 @@ input{font:inherit}
      (.cinematic-hero padding 48px / min-height 520px, .hero-title 46px,
      .glassplay-btn 380px wide) and .cinematic-hero has overflow:hidden,
      so on a ~390px phone the play button was cut at the right edge. */
-  html { overflow-x: hidden; }
+  /* (html overflow-x:hidden giờ áp dụng ở mọi chiều rộng — xem block
+     rotation zoom fix ở trên, không chỉ <=640px nữa) */
   .cinematic-hero { padding: 24px 20px; min-height: 440px; }
   .hero-title { font-size: 32px; }
   .glassplay-btn { width: 100%; max-width: 380px; height: 64px; }
