@@ -1538,6 +1538,20 @@ input{font:inherit}
   .origin-morph-island.expanded { width: min(295px, calc(100vw - 24px)); }
   .watch__head h1, .detail__body h1 { overflow-wrap: anywhere; word-break: break-word; }
   .watch__head { padding: 20px 14px 0; }
+  /* QA 2026-11-11: mobile hero — base rules are desktop-sized
+     (.cinematic-hero padding 48px / min-height 520px, .hero-title 46px,
+     .glassplay-btn 380px wide) and .cinematic-hero has overflow:hidden,
+     so on a ~390px phone the play button was cut at the right edge. */
+  html { overflow-x: hidden; }
+  .cinematic-hero { padding: 24px 20px; min-height: 440px; }
+  .hero-title { font-size: 32px; }
+  .glassplay-btn { width: 100%; max-width: 380px; height: 64px; }
+  .hero-secondary-btn { height: 56px; padding: 0 20px; }
+  .hero-actions { gap: 12px; }
+  /* Tab bar: base rule sets touch-action:none, so the bar could not be
+     swiped horizontally on phones. pan-x lets it scroll; tap navigation
+     (click handlers in initCinemaUI) is unchanged. */
+  .ios27-tabbar { touch-action: pan-x; }
 }
 /* Blog list must never render as an empty strip: keep cards visible even
    while their (async) content is still loading. */
