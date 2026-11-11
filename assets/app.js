@@ -126,16 +126,106 @@ const POSTER_FALLBACK = '/brand/poster-placeholder.svg';
 const posterUrl = m => { const u = String((m && (m.poster_url || m.thumb_url)) || '').trim(); return u && u !== 'null' ? u : POSTER_FALLBACK; };
 const POSTER_ONERROR = "this.onerror=null;this.src='" + POSTER_FALLBACK + "';this.classList.add('ph')";
 /* Same movie can appear 2-4x in one Supabase/live result (same slug, or same
-   normalised name+year from different sources). Keep the first occurrence. */
+   normalised name+year from different sources). Keep the first occurrence.
+   Key on normalised title (+ origin title, year, type) instead of slug:
+   the same film arrives under different slugs per source, e.g.
+   "harry-potter-va-can-phong-bi-mat" vs "vsmov-harry-potter-va-can-phong-bi-mat".
+   The part marker stays in the key, so different parts never collapse. */
+const normTitle = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  .replace(/^(vsmov|phimapi)\s+/, '')
+  .replace(/\s+(fhd|full hd|hd|4k|cam|vietsub|thuyet minh|long tieng|full)\s*$/g, '').trim();
 const dedupeMovies = rows => {
   const seen = new Set(); const out = [];
   for (const m of rows || []) {
     if (!m) continue;
-    const key = m.slug || m.id || (String(m.name || '').trim().toLowerCase() + '|' + (m.year || ''));
+    const name = normTitle(m.name) || normTitle(m.origin_name);
+    const key = name && m.year
+      ? `t:${name}|${normTitle(m.origin_name)}|${m.year}|${String(m.type || '').toLowerCase()}`
+      : (m.slug || m.id || (String(m.name || '').trim().toLowerCase() + '|' + (m.year || '')));
     if (seen.has(key)) continue;
     seen.add(key); out.push(m);
   }
   return out;
+};
+
+/* QA 2026-11-11 (PR #6): series/part-aware ordering for search results.
+   Search merges 4 batches (local + Supabase + VSMOV + PhimAPI) and the old code
+   rendered them in merge order, so "Harry Potter" came back 2, 5, special,
+   special, 6, 7.1, 7.2, 6, 3, 1, 4, 7.1, 5, 2, special — and the trailing
+   "Tập mới"/"Full" batch always sat at the end unsorted.
+   Rule: group by franchise (first two words of the normalised original title),
+   keep groups in first-appearance order, and inside a group sort specials last,
+   then by release year ascending (the most reliable part key — HP parts 1-6
+   carry no part number in the title, but their years 2001..2011 rise exactly
+   with the part), then by explicit part number (same-year sequels / 7.1 vs 7.2),
+   then by name. Works for any franchise, nothing is hardcoded to one title. */
+const ROMAN = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
+const romanToInt = s => {
+  const t = String(s || '').toLowerCase();
+  if (!/^[ivxlcdm]+$/.test(t)) return null;
+  let total = 0, prev = 0;
+  for (let i = t.length - 1; i >= 0; i--) { const v = ROMAN[t[i]]; total += v < prev ? -v : v; prev = Math.max(prev, v); }
+  return total > 0 && total <= 30 ? total : null;
+};
+const SPECIAL_RE = /k[ỷy] ni[ệe]m|anniversary|tr[ởo] l[ạa]i|reunion|t[ựu]u tr[ườu][ờo]ng|hogwarts.*(reunion|return)|special|[đd][ặa]c bi[ệe]t|trailer|h[ậa]u tr[ườu][ờo]ng|behind the scenes|making of/i;
+const isSpecialTitle = m => SPECIAL_RE.test(`${m.name || ''} ${m.origin_name || ''} ${m.slug || ''}`);
+const extractPart = m => {
+  const text = `${m.name || ''} ${m.origin_name || ''} ${m.slug || ''}`;
+  let mm = /(?:ph[aâ]n|part|season|movie|t[aâ]p)\s*([ivxlcdm]{1,4}|\d+(?:\.\d+)?)/i.exec(text);
+  if (mm) {
+    const raw = mm[1];
+    if (/^\d/.test(raw)) { const n = parseFloat(raw); if (n >= 1 && n <= 100) return n; }
+    const r = romanToInt(raw);
+    if (r) return r;
+  }
+  mm = /(?:phan|part)-(\d+(?:\.\d+)?)/i.exec(String(m.slug || ''));
+  if (mm) return parseFloat(mm[1]);
+  /* Bare trailing number on the original title, e.g. "Harry Potter 5". */
+  mm = /\s(\d+(?:\.\d+)?)\s*$/.exec(String(m.origin_name || '').trim());
+  if (mm) { const n = parseFloat(mm[1]); if (n >= 1 && n < 1900) return n; }
+  return null;
+};
+const seriesKey = m => {
+  const base = normTitle(m.origin_name || m.name)
+    .replace(/\b(ph[aâ]n|part|season|movie|t[aâ]p)\s*([ivxlcdm]+|\d+(?:\.\d+)?)\b/g, '')
+    .replace(/\b\d+(?:\.\d+)?\s*$/g, '')
+    .replace(/\s+/g, ' ').trim();
+  return base.split(' ').slice(0, 2).join(' ') || base;
+};
+const sortSeriesOrder = rows => {
+  const groups = new Map();
+  (rows || []).forEach((m, i) => {
+    const k = seriesKey(m);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push({ m, i });
+  });
+  const out = [];
+  for (const items of groups.values()) {
+    items.sort((a, b) => {
+      const sa = isSpecialTitle(a.m) ? 1 : 0, sb = isSpecialTitle(b.m) ? 1 : 0;
+      if (sa !== sb) return sa - sb;
+      const ya = Number(a.m.year) || Infinity, yb = Number(b.m.year) || Infinity;
+      if (ya !== yb) return ya - yb;
+      const pa = extractPart(a.m), pb = extractPart(b.m);
+      const na = pa == null ? Infinity : pa, nb = pb == null ? Infinity : pb;
+      if (na !== nb) return na - nb;
+      return String(a.m.name || '').localeCompare(String(b.m.name || ''), 'vi') || a.i - b.i;
+    });
+    out.push(...items.map(x => x.m));
+  }
+  return out;
+};
+/* Search sort dispatcher. Explicit "Xem nhiều"/"Điểm cao" win (Supabase already
+   ordered those server-side); "Tên A-Z" and "Mới nhất" are applied globally so
+   the merged live batches follow them too. Default (no sort) and "part" use
+   the series/part order above. */
+const sortSearchResults = (rows, sort) => {
+  const list = dedupeMovies(rows);
+  if (sort === 'watch' || sort === 'rating') return list;
+  if (sort === 'name') return [...list].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'vi'));
+  if (sort === 'new') return [...list].sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'vi'));
+  return sortSeriesOrder(list);
 };
 /* Episode count = distinct episode numbers across ALL servers.
    Counting server entries (the old behaviour) counted sources as episodes
@@ -1791,7 +1881,7 @@ function searchForm(values = {}) {
     <select name="cat">${opt(GENRES, values.cat, 'Thể loại')}</select>
     <select name="country">${opt(COUNTRIES, values.country, 'Quốc gia')}</select>
     <select name="year">${['', 2026, 2025, 2024, 2023, 2022, 2021, 2020].map(y => `<option value="${y}"${String(values.year || '') === String(y) ? ' selected' : ''}>${y || 'Năm'}</option>`).join('')}</select>
-    <select name="sort">${[['watch', 'Xem nhiều'], ['new', 'Mới nhất'], ['rating', 'Điểm cao'], ['name', 'Tên A-Z']].map(([v, n]) => `<option value="${v}"${values.sort === v ? ' selected' : ''}>${n}</option>`).join('')}</select>
+    <select name="sort">${[['part', 'Theo thứ tự phần'], ['watch', 'Xem nhiều'], ['new', 'Mới nhất'], ['rating', 'Điểm cao'], ['name', 'Tên A-Z']].map(([v, n]) => `<option value="${v}"${(values.sort === v || (v === 'part' && !values.sort)) ? ' selected' : ''}>${n}</option>`).join('')}</select>
     <button class="btn btn--primary" type="submit">Tìm</button>
   </form>`;
 }
@@ -1802,6 +1892,8 @@ function buildParams(v) {
   if (v.cat) p.category = `cs.[{"slug":"${v.cat}"}]`;
   if (v.country) p.country = `cs.[{"slug":"${v.country}"}]`;
   if (v.year) p.year = 'eq.' + v.year;
+  /* "part": Supabase has no part order — server order is only a starting point,
+     renderSearch/renderFilter re-sort client-side with sortSeriesOrder. */
   p.order = v.sort === 'watch' ? 'view.desc.nullslast' : v.sort === 'rating' ? 'tmdb_vote_average.desc.nullslast' : v.sort === 'name' ? 'name.asc' : NEWEST;
   const t = term(v.q);
   if (t) p.or = `(name.ilike.*${t}*,origin_name.ilike.*${t}*)`;
@@ -1884,9 +1976,14 @@ async function renderSearch(params) {
       }
     }
 
-    const totalCount = Math.max(allRows.length, (supabaseRes.total || 0) + localHits.length);
+    /* QA 2026-11-11 (PR #6): sort GLOBALLY after all batches are merged —
+       the old code rendered merge order, so the trailing "Tập mới"/"Full"
+       batch always sat at the end unsorted. sortSearchResults also dedupes
+       the same film arriving under different slugs/sources. */
+    const ordered = sortSearchResults(allRows, eq.sort);
+    const totalCount = Math.max(ordered.length, (supabaseRes.total || 0) + localHits.length);
     box.innerHTML = `<p class="count">${totalCount ? `${num(totalCount)} kết quả ${supabaseRes.totalPages > 1 ? `· trang ${page}/${supabaseRes.totalPages}` : ''}` : 'Không có kết quả'}</p>
-      <section class="section">${allRows.length ? gridHtml(allRows) : emptyBox('Không tìm thấy phim phù hợp.')}</section>
+      <section class="section">${ordered.length ? gridHtml(ordered) : emptyBox('Không tìm thấy phim phù hợp.')}</section>
       ${supabaseRes.totalPages > 1 ? pager(page, supabaseRes.totalPages, p => `/tim-kiem?${qs}${qs ? '&' : ''}page=${p}`) : ''}`;
   } catch (e) {
     box.innerHTML = emptyBox('Lỗi: ' + e.message);
@@ -1905,8 +2002,10 @@ async function renderFilter(params) {
   try {
     const res = await api('movies', { ...BASE, select: CARD_FIELDS, ...buildParams(eq) }, { page, paged: true });
     const qs = new URLSearchParams(Object.entries(eq).filter(([, v]) => v)).toString();
+    /* "Theo thứ tự phần" on the filter page also re-sorts client-side. */
+    const fRows = eq.sort === 'part' ? sortSeriesOrder(res.rows) : res.rows;
     box.innerHTML = `<p class="count">${res.total ? `${num(res.total)} phim · trang ${page}/${res.totalPages}` : 'Không có kết quả'}</p>
-      <section class="section">${res.rows.length ? gridHtml(res.rows) : emptyBox('Không có phim phù hợp bộ lọc.')}</section>
+      <section class="section">${fRows.length ? gridHtml(fRows) : emptyBox('Không có phim phù hợp bộ lọc.')}</section>
       ${pager(page, res.totalPages, p => `/loc-phim?${qs}${qs ? '&' : ''}page=${p}`)}`;
   } catch (e) {
     box.innerHTML = emptyBox('Lỗi: ' + e.message);
@@ -1915,7 +2014,11 @@ async function renderFilter(params) {
 }
 
 function bindFilterForm(action) {
-  document.getElementById('filterForm')?.addEventListener('submit', e => {
+  const form = document.getElementById('filterForm');
+  /* QA 2026-11-11 (PR #6): changing the sort applies immediately — the old
+     behaviour only applied the sort after pressing "Tìm". */
+  form?.querySelector('select[name="sort"]')?.addEventListener('change', () => form.requestSubmit());
+  form?.addEventListener('submit', e => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const qs = new URLSearchParams();
