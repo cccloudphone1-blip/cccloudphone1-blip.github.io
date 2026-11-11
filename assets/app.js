@@ -933,8 +933,11 @@ async function fetchVsmovMovie(slug) {
         const serverName = /vsmov/i.test(rawName) ? rawName : `VSMOV · ${rawName}`;
         const eps = (s.server_data || []).map((e, idx) => {
           const embed = e.link_embed || '';
-          const m3u8 = e.link_m3u8 || '';
-          const link = embed || m3u8;
+          let m3u8 = e.link_m3u8 || '';
+          if (!m3u8 && embed && embed.includes('/video/')) {
+            m3u8 = embed.replace('/video/', '/stream/') + '/master.m3u8';
+          }
+          const link = m3u8 || embed;
           const num = Number(String(e.slug || '').replace(/\D+/g, '') || e.name || idx + 1) || (idx + 1);
           return {
             num,
@@ -984,9 +987,29 @@ async function fetchPhimapiMovie(slug) {
       actor: m.actor || [],
       director: m.director || [],
       tmdb_vote_average: m.tmdb?.vote_average || 0,
+      imdb_id: m.imdb?.id || HP_IMDB[slug] || '',
+      tmdb_id: m.tmdb?.id || '',
       _phimapiLive: true,
     };
     const servers = [];
+    const imdbId = m.imdb?.id || HP_IMDB[slug] || '';
+    const tmdbId = m.tmdb?.id || '';
+    const targetId = imdbId || tmdbId;
+    if (targetId) {
+      const isMovie = m.type === 'single' || !m.type;
+      if (isMovie) {
+        servers.push({
+          name: 'VIP Dự Phòng · AutoEmbed',
+          audio: 'Vietsub Quốc Tế',
+          eps: [{ num: 1, name: 'Tập Full', link: `https://autoembed.co/movie/imdb/${targetId}`, embed: `https://autoembed.co/movie/imdb/${targetId}`, m3u8: '' }]
+        });
+        servers.push({
+          name: 'VIP Dự Phòng · 2Embed',
+          audio: 'Vietsub Quốc Tế',
+          eps: [{ num: 1, name: 'Tập Full', link: `https://www.2embed.cc/embed/${targetId}`, embed: `https://www.2embed.cc/embed/${targetId}`, m3u8: '' }]
+        });
+      }
+    }
     if (Array.isArray(json.episodes)) {
       for (const s of json.episodes) {
         const rawName = (s.server_name || 'Vietsub').trim();
@@ -1227,6 +1250,24 @@ async function fetchLiveStreams(slug, movieTitle, originName) {
         }
       }
       if (pData?.episodes) {
+        const imdbId = pData.movie?.imdb?.id || HP_IMDB[slug] || '';
+        const tmdbId = pData.movie?.tmdb?.id || '';
+        const targetId = imdbId || tmdbId;
+        if (targetId) {
+          const isMovie = pData.movie?.type === 'single' || !pData.movie?.type;
+          if (isMovie) {
+            liveServers.push({
+              name: 'VIP Dự Phòng · AutoEmbed',
+              audio: 'Vietsub Quốc Tế',
+              eps: [{ num: 1, name: 'Tập Full', link: `https://autoembed.co/movie/imdb/${targetId}`, embed: `https://autoembed.co/movie/imdb/${targetId}`, m3u8: '' }],
+            });
+            liveServers.push({
+              name: 'VIP Dự Phòng · 2Embed',
+              audio: 'Vietsub Quốc Tế',
+              eps: [{ num: 1, name: 'Tập Full', link: `https://www.2embed.cc/embed/${targetId}`, embed: `https://www.2embed.cc/embed/${targetId}`, m3u8: '' }],
+            });
+          }
+        }
         for (const s of pData.episodes) {
           const rawName = (s.server_name || 'Vietsub').trim();
           const serverName = `PhimAPI · ${rawName}`;
@@ -1720,14 +1761,34 @@ const DEAD_KEY = 'kp_dead_hosts';
 const DEAD_SEED = [
   'kkphimplayer7.com',
   'v7.kkphimplayer7.com',
+  'kkphimplayer6.com',
+  's6.kkphimplayer6.com',
   'a.kvp726.com',
+  'b.kvp726.com',
   'phim1280.tv',
+  's1.phim1280.tv',
+  's2.phim1280.tv',
   'streamc.xyz',
   'short.icu',
   'dailymotion.com',
 ];
 /* nguồn chặn nhúng iframe (X-Frame-Options / 403) */
 const NOFRAME = ['streamc.xyz', 'dailymotion.com', 'short.icu'];
+
+const HP_IMDB = {
+  'harry-potter-va-hon-da-phu-thuy': 'tt0241527',
+  'harry-potter-va-can-phong-bi-mat': 'tt0295297',
+  'harry-potter-va-ten-tu-nhan-nguc-azkaban': 'tt0304141',
+  'harry-potter-va-tu-nhan-azkaban': 'tt0304141',
+  'harry-potter-va-chiec-coc-lua': 'tt0330373',
+  'harry-potter-va-hoi-phuong-hoang': 'tt0373889',
+  'harry-potter-va-menh-lenh-phuong-hoang': 'tt0373889',
+  'harry-potter-va-hoang-tu-lai': 'tt0417741',
+  'harry-potter-va-bao-boi-tu-than-1': 'tt0926084',
+  'harry-potter-va-bao-boi-tu-than-phan-1': 'tt0926084',
+  'harry-potter-va-bao-boi-tu-than-2': 'tt1201607',
+  'harry-potter-va-bao-boi-tu-than-phan-2': 'tt1201607',
+};
 const DEAD_TTL = 6 * 3600 * 1000;
 const RETRY_TTL = 3 * 60 * 1000;
 let retryOverride = { slug: '', until: 0 };
@@ -2033,19 +2094,21 @@ function mountEpisodes(movie, servers, state) {
       const stallTimer = setTimeout(() => {
         if (vid.isConnected && vid.readyState < 2) {
           markDead(item.m3u8);
+          if (item.embed) markDead(item.embed);
           if (!hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`)) {
             showDead(item.m3u8, 'không còn nguồn thay thế', true);
           }
         }
-      }, 12000);
+      }, 7000);
       vid.addEventListener('loadedmetadata', () => clearTimeout(stallTimer), { once: true });
       attachHls(vid, item.m3u8, () => {
         markDead(item.m3u8);
+        if (item.embed) markDead(item.embed);
         if (hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`)) {
           return;
         }
         notice('Đang tìm nguồn phát trực tiếp thay thế...');
-        fetchLiveStreams(movie.slug).then(liveList => {
+        fetchLiveStreams(movie.slug, movie.name, movie.origin_name).then(liveList => {
           if (liveList && liveList.length) {
             const known = new Set(servers.map(s => s.name.toLowerCase()));
             let added = false;
@@ -2069,17 +2132,19 @@ function mountEpisodes(movie, servers, state) {
           if (vsmovSv) {
             const vEp = vsmovSv.eps[cur.ep];
             const vSrc = vEp.embed || vEp.m3u8 || vEp.link;
-            if (vSrc) {
+            if (vSrc && !isDead(vSrc)) {
               mountEmbed(vSrc, vEp);
               return;
             }
           }
-          if (item.embed) {
-            mountEmbed(item.embed, item);
+          const nextP = seek(cur.sv + 1, 0) || seekBack(cur.sv - 1, 0);
+          if (nextP) {
+            cur.sv = nextP.s; cur.ep = nextP.e;
+            sync(); render();
+            notice('Đã chuyển sang máy chủ dự phòng tiếp theo.');
             return;
           }
-          const wrap = 'https://player.phimapi.com/player/?url=' + encodeURIComponent(item.m3u8);
-          mountEmbed(wrap, item);
+          showDead(item.m3u8, 'Tất cả các nguồn phát hiện tại đang bảo trì', true);
         });
       }, () => markAlive(item.m3u8));
     } else {
