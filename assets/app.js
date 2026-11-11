@@ -1478,12 +1478,16 @@ async function loadMovie(slug) {
     const aDead = (a.eps[0] && isDead(a.eps[0].embed || a.eps[0].m3u8 || a.eps[0].link)) ? 1 : 0;
     const bDead = (b.eps[0] && isDead(b.eps[0].embed || b.eps[0].m3u8 || b.eps[0].link)) ? 1 : 0;
     if (aDead !== bDead) return aDead - bDead;
+    const isVipA = /vip dự phòng/i.test(a.name);
+    const isVipB = /vip dự phòng/i.test(b.name);
+    const isNguoncA = /nguồn c/i.test(a.name);
+    const isNguoncB = /nguồn c/i.test(b.name);
     const isVsmovA = /vsmov/i.test(a.name) || (a.eps[0] && /vsmov/i.test(a.eps[0].embed || a.eps[0].link || ''));
     const isVsmovB = /vsmov/i.test(b.name) || (b.eps[0] && /vsmov/i.test(b.eps[0].embed || b.eps[0].link || ''));
     const isPhimapiA = /phimapi/i.test(a.name);
     const isPhimapiB = /phimapi/i.test(b.name);
-    const scoreA = (isVsmovA ? 100 : 0) + (isPhimapiA ? 70 : 0) + (/vietsub/i.test(a.name) ? 15 : 0) + (/thuyết minh/i.test(a.audio + a.name) ? 5 : 0);
-    const scoreB = (isVsmovB ? 100 : 0) + (isPhimapiB ? 70 : 0) + (/vietsub/i.test(b.name) ? 15 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0);
+    const scoreA = (isVipA ? 150 : 0) + (isVsmovA ? 100 : 0) + (isNguoncA ? 85 : 0) + (isPhimapiA ? 70 : 0) + (/vietsub/i.test(a.name) ? 15 : 0) + (/thuyết minh/i.test(a.audio + a.name) ? 5 : 0);
+    const scoreB = (isVipB ? 150 : 0) + (isVsmovB ? 100 : 0) + (isNguoncB ? 85 : 0) + (isPhimapiB ? 70 : 0) + (/vietsub/i.test(b.name) ? 15 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0);
     return scoreB - scoreA || b.eps.length - a.eps.length;
   });
 
