@@ -2591,7 +2591,7 @@ function bindHeader() {
         const qAtFetch = q;
         const { rows } = await api('movies', {
           ...BASE, select: 'slug,name,origin_name,year,poster_url,thumb_url',
-          or: `(name.ilike.*${t}*,origin_name.ilike.*${t}*)`, order: 'year.asc.nullslast', limit: 20,
+          or: `(name.ilike.*${t}*,origin_name.ilike.*${t}*)`, order: 'year.asc.nullslast', limit: 100,
         });
         /* Ignore a stale response if the user kept typing. */
         if (input.value.trim() !== qAtFetch) return;
@@ -2600,9 +2600,15 @@ function bindHeader() {
            results page it still showed parts out of order with duplicates
            (e.g. "Hoàng Tử Lai" 2009 twice, then Part 1, then Part 5). Reuse
            the same series/part ordering + dedupe as the results page, then
-           show the first 6. Year-ascending server order makes sure the
-           earliest parts are inside the fetched window for big franchises. */
-        const list = sortSearchResults(rows).slice(0, 6);
+           show the first 10. Year-ascending server order makes sure the
+           earliest parts are inside the fetched window for big franchises.
+           QA 2026-11-11 (PR #8): limit was 20 and dedupe/sort happened AFTER
+           the fetch in JS — duplicate rows of Parts 1–6 from different
+           sources filled the 20-row window, so Parts 7.1 (2010) and 7.2
+           (2011) never reached the client and the dropdown stopped at
+           Part 6. Raised to 100 small card rows so dedupe has the whole
+           franchise to work with before slicing. */
+        const list = sortSearchResults(rows).slice(0, 10);
         if (!list.length) { sug.hidden = true; return; }
         sug.innerHTML = list.map(m => `<a href="/phim/${esc(m.slug)}">
           <img src="${esc(posterUrl(m))}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/brand/poster-placeholder.svg'">
@@ -2611,7 +2617,15 @@ function bindHeader() {
       } catch {}
     }, 320);
   });
-  input.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; }, 180));
+  /* QA 2026-11-11 (PR #8): on touch, starting a scroll gesture inside the
+     dropdown blurs the input — the old blur handler then hid the dropdown
+     180ms later, mid-scroll, so the list could never be scrolled ("ko kéo
+     đc"). While a finger is down on the dropdown, don't auto-hide it. */
+  let sugTouching = false;
+  sug.addEventListener('pointerdown', () => { sugTouching = true; });
+  sug.addEventListener('pointerup', () => { sugTouching = false; });
+  sug.addEventListener('pointercancel', () => { sugTouching = false; });
+  input.addEventListener('blur', () => setTimeout(() => { if (!sugTouching) sug.hidden = true; }, 180));
   document.addEventListener('click', e => { if (!form.contains(e.target)) sug.hidden = true; });
 
   /* "/" để focus ô tìm kiếm */
@@ -2651,7 +2665,13 @@ function initCinemaUI() {
   // 1. TABBAR DANH MỤC PHIM (CLICK HOẶC KÉO RÊ CHUYỂN TAB)
   const tabBar = document.getElementById('ios27TabBar');
   const droplet = document.getElementById('tabWaterDroplet');
-  if (tabBar && droplet && !tabBar._bound) {
+  if (tabBar && droplet) {
+    // SPA navigation (go()/popstate) re-runs initCinemaUI but the listeners
+    // are bound once; just refresh which tab is active + the droplet.
+    // (No early return here: section 2 below must still run.)
+    if (tabBar._bound) {
+      if (tabBar._refreshTab) tabBar._refreshTab();
+    } else {
     tabBar._bound = true;
     const tabs = [...tabBar.querySelectorAll('.tab-btn')];
 
@@ -2659,43 +2679,112 @@ function initCinemaUI() {
       if (!activeTab) return;
       const tRect = activeTab.getBoundingClientRect();
       const bRect = tabBar.getBoundingClientRect();
-      const left = tRect.left - bRect.left;
+      /* QA 2026-11-11 (PR #8): the droplet is a child of the scrollable
+         tab bar, so its transform is in scroll-CONTENT coordinates, while
+         getBoundingClientRect() is viewport-relative. On a ~390px phone the
+         bar is scrolled (6 tabs don't fit), so the old
+         `tRect.left - bRect.left` landed the pill off by exactly
+         tabBar.scrollLeft — the "nhảy lệch" bug. Add scrollLeft back. */
+      const left = tRect.left - bRect.left + tabBar.scrollLeft;
       droplet.style.transform = `translate3d(${left}px, 0, 0)`;
       droplet.style.width = `${tRect.width}px`;
     }
 
+    function refreshTab() {
+      const cur = location.pathname;
+      const m = tabs.find(t => t.getAttribute('href') === cur) || tabs[0];
+      tabs.forEach(t => t.classList.toggle('active', t === m));
+      updateDroplet(m);
+      return m;
+    }
+    tabBar._refreshTab = refreshTab;
+
     // Cập nhật tab active theo pathname hiện tại
-    const currentPath = location.pathname;
-    const matchedTab = tabs.find(t => t.getAttribute('href') === currentPath) || tabs[0];
-    tabs.forEach(t => t.classList.toggle('active', t === matchedTab));
-    updateDroplet(matchedTab);
+    const matchedTab = refreshTab();
+
+    // Giữ giọt nước bám đúng tab khi người dùng cuộn ngang thanh tab.
+    tabBar.addEventListener('scroll', () => {
+      const active = tabs.find(t => t.classList.contains('active')) || matchedTab;
+      updateDroplet(active);
+    }, { passive: true });
+
+    let suppressClick = false;
 
     tabs.forEach(tab => {
       tab.addEventListener('click', (e) => {
+        /* QA 2026-11-11 (PR #8): a click that follows a real drag must not
+           navigate a second time (pointerup already did via go()). */
+        if (suppressClick) { suppressClick = false; return; }
         tabs.forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         droplet.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.3s ease';
         updateDroplet(tab);
+        tab.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+        /* The old click handler never navigated — navigation relied entirely
+           on the window pointerup handler, so when the browser cancelled the
+           gesture (pointercancel) the tap did nothing at all. A plain tap
+           now navigates here, reliably. */
+        const href = tab.getAttribute('href');
+        if (href && location.pathname !== href) {
+          e.preventDefault();
+          go(href);
+        }
       });
     });
 
     let isDragging = false;
+    let dragMoved = false;
+    let startX = 0;
+    let startY = 0;
     let lastTab = matchedTab;
+    const DRAG_THRESHOLD = 8; /* px: finger jitter of a plain tap stays below this */
+
+    function endDrag(cancelled) {
+      if (!isDragging) return;
+      isDragging = false;
+      droplet.style.transition = 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.25s ease';
+      if (cancelled || !dragMoved) {
+        /* Gesture was taken over by the browser (scroll) or was a plain tap:
+           restore the pill to the actually-active tab and navigate nowhere.
+           The click handler owns plain-tap navigation. */
+        dragMoved = false;
+        refreshTab();
+        return;
+      }
+      dragMoved = false;
+      if (lastTab) {
+        updateDroplet(lastTab);
+        lastTab.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+        const href = lastTab.getAttribute('href');
+        if (href && location.pathname !== href) {
+          suppressClick = true;
+          setTimeout(() => { suppressClick = false; }, 400);
+          go(href);
+        }
+      }
+    }
 
     tabBar.addEventListener('pointerdown', (e) => {
       if (e.button !== undefined && e.button !== 0) return;
       const targetTab = e.target.closest('.tab-btn');
-      if (targetTab) {
-        tabs.forEach(t => t.classList.remove('active'));
-        targetTab.classList.add('active');
-        lastTab = targetTab;
-      }
+      if (!targetTab) return; /* press on empty bar area: let native scroll handle it */
+      startX = e.clientX;
+      startY = e.clientY;
+      dragMoved = false;
+      tabs.forEach(t => t.classList.remove('active'));
+      targetTab.classList.add('active');
+      lastTab = targetTab;
       isDragging = true;
       droplet.style.transition = 'none';
     });
 
     window.addEventListener('pointermove', (e) => {
       if (!isDragging) return;
+      /* QA 2026-11-11 (PR #8): the old code switched tabs on ANY movement,
+         so the tiny jitter of a plain tap could land the pill/navigation on
+         a neighbouring tab. Only treat it as a drag past a small threshold. */
+      if (!dragMoved && Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_THRESHOLD) return;
+      dragMoved = true;
       const bRect = tabBar.getBoundingClientRect();
       const relX = Math.max(0, Math.min(bRect.width, e.clientX - bRect.left));
 
@@ -2716,18 +2805,16 @@ function initCinemaUI() {
       }
     });
 
-    window.addEventListener('pointerup', () => {
-      if (!isDragging) return;
-      isDragging = false;
-      droplet.style.transition = 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.25s ease';
-      if (lastTab) {
-        updateDroplet(lastTab);
-        const href = lastTab.getAttribute('href');
-        if (href && location.pathname !== href) {
-          go(href);
-        }
-      }
-    });
+    window.addEventListener('pointerup', () => endDrag(false));
+    /* QA 2026-11-11 (PR #8): there was NO pointercancel handler at all.
+       On a phone the tab bar is touch-action: pan-x, so a tap with even
+       slight finger movement is taken over by the browser as a scroll: it
+       fires pointercancel instead of pointerup, navigation never happened,
+       the click was suppressed, and isDragging stayed stuck true — so the
+       NEXT touch kept re-picking tabs. That is why "Anime 4K" could not be
+       tapped on touch but worked with a mouse (mouse never pointercancels). */
+    window.addEventListener('pointercancel', () => endDrag(true));
+    } /* end else (first bind) */
   }
 
   // 2. NÚT 3 CHẤM MENU TIỆN ÍCH MỞ RỘNG (CLICK BẤT KỲ ĐÂU ĐỀU MỞ)

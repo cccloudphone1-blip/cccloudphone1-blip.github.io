@@ -38,7 +38,12 @@ input{font:inherit}
 .search input::placeholder{color:#6b7386}
 .search button{padding:9px 13px;background:#171d29;border-left:1px solid var(--line);font-size:13px;font-weight:700;color:#b9c2d3}
 .search button:hover{color:#fff;background:#1d2534}
-.suggest{position:absolute;top:calc(100% + 8px);right:0;width:360px;background:#10141d;border:1px solid var(--line);border-radius:12px;box-shadow:0 26px 60px rgba(0,0,0,.65);padding:6px;z-index:120}
+.suggest{position:absolute;top:calc(100% + 8px);right:0;width:360px;background:#10141d;border:1px solid var(--line);border-radius:12px;box-shadow:0 26px 60px rgba(0,0,0,.65);padding:6px;z-index:120;max-height:min(62vh,430px);overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain}
+/* QA 2026-11-11 (PR #8): the dropdown had no max-height / overflow at all,
+   so on a phone it could not be scrolled by touch — it just grew to fit its
+   6 items and any swipe inside it scrolled the page behind (or, with the
+   input blurred, hid the list mid-gesture). Now it scrolls vertically
+   inside its own box, so all 10 shown suggestions are reachable. */
 .suggest a{display:flex;gap:10px;align-items:center;padding:7px;border-radius:8px}
 .suggest a:hover{background:#181e2a}
 .suggest img{width:42px;height:60px;object-fit:cover;border-radius:6px;background:#1a1f2b;flex:0 0 auto}
