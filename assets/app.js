@@ -763,8 +763,6 @@ function bindLoadMore({ params, pageNum, totalPages }) {
       else {
         btn.disabled = false;
         btn.textContent = label;
-        /* nếu nút vẫn nằm trong tầm nhìn thì nạp tiếp cho tới khi đầy màn hình */
-        if (btn.getBoundingClientRect().top < window.innerHeight + 500) setTimeout(run, 200);
       }
     } catch {
       btn.disabled = false;
@@ -773,15 +771,18 @@ function bindLoadMore({ params, pageNum, totalPages }) {
       busy = false;
     }
   };
+  /* QA 2026-11-11 (PR #8): the button is the primary control, by James's
+     explicit choice ("Cứ để nút đi để thấy đc bảng nếu muốn"). There used to
+     be an auto infinite-scroll trigger here (window scroll listener firing
+     when the button came within 500px of the viewport, plus a chain-load
+     after each batch). It fired LATE: the user scrolled fast, the static
+     footer card below the list flashed into view first, and only 1–2s later
+     — the Supabase fetch latency — did the next batch arrive and push the
+     footer down, which looked broken. Auto-load is removed entirely: tap
+     "Tải thêm phim" to load the next batch (the button shows "Đang tải..."
+     while fetching); don't tap it and scrolling further simply reveals the
+     footer card, which stays reachable at the very bottom. */
   btn.addEventListener('click', run);
-  /* tự nạp khi cuộn gần tới nút */
-  const onScroll = () => {
-    if (!document.body.contains(btn)) { removeEventListener('scroll', onScroll); return; }
-    if (btn.disabled) return;
-    if (btn.getBoundingClientRect().top < window.innerHeight + 500) run();
-  };
-  addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
 }
 
 async function renderCollection(opts) {
