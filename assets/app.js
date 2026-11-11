@@ -123,7 +123,13 @@ const num = n => Number(n).toLocaleString('vi-VN');
 /* QA 2026-11-11: poster fallback (local placeholder, no external dependency),
    list dedupe, distinct-episode counting, fetch timeout for live sources. */
 const POSTER_FALLBACK = '/brand/poster-placeholder.svg';
-const posterUrl = m => { const u = String((m && (m.poster_url || m.thumb_url)) || '').trim(); return u && u !== 'null' ? u : POSTER_FALLBACK; };
+const posterUrl = m => {
+  if (!m) return POSTER_FALLBACK;
+  let u = m.poster_url || m.thumb_url || '';
+  if (typeof u === 'object' && u !== null) u = u.url || u.link || u.src || '';
+  u = String(u || '').trim();
+  return (u && u !== 'null' && u !== '[object Object]') ? u : POSTER_FALLBACK;
+};
 const POSTER_ONERROR = "this.onerror=null;this.src='" + POSTER_FALLBACK + "';this.classList.add('ph')";
 /* Same movie can appear 2-4x in one Supabase/live result (same slug, or same
    normalised name+year from different sources). Keep the first occurrence.
@@ -383,7 +389,8 @@ async function api(path, params = {}, { page = 1, per = PER, paged = false } = {
   }
   let res;
   try {
-    res = await fetch(url, { headers });
+    const signal = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(6000) : undefined;
+    res = await fetch(url, { headers, signal });
   } catch (e) {
     const fb = path === 'movies' ? await fallbackMovies(params, page).catch(() => null) : null;
     if (fb) { mem.set(ck, fb); return fb; }
@@ -439,13 +446,20 @@ function recordHistory(m, epIndex, epName, sv, svName) {
 /* ---------------- cards ---------------- */
 const rating = m => Number(m.tmdb_vote_average || 0) || 0;
 const safeImg = url => {
-  if (!url) return '';
+  if (!url || typeof url !== 'string' || url === '[object Object]') return '';
   if (url.includes('image.tmdb.org')) {
     return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=600&q=85&output=webp`;
   }
   return url;
 };
-const bgUrl = m => safeImg(m.hero_backdrop_url || m.backdrop_url || m.thumb_url || m.poster_url || '');
+const bgUrl = m => {
+  if (!m) return '';
+  let u = m.hero_backdrop_url || m.backdrop_url || m.thumb_url || m.poster_url || '';
+  if (typeof u === 'object' && u !== null) u = u.url || u.link || u.src || '';
+  u = String(u || '').trim();
+  if (!u || u === 'null' || u === '[object Object]') return '';
+  return safeImg(u);
+};
 
 function card(m) {
   const rate = rating(m);
@@ -585,9 +599,15 @@ function initHero() {
       if (active) {
         s.removeAttribute('hidden');
         s.style.display = 'flex';
+        s.style.pointerEvents = 'auto';
+        s.style.opacity = '1';
+        s.style.zIndex = '3';
       } else {
         s.setAttribute('hidden', '');
         s.style.display = 'none';
+        s.style.pointerEvents = 'none';
+        s.style.opacity = '0';
+        s.style.zIndex = '0';
       }
     });
     imgs.forEach((s, i) => s.classList.toggle('on', i === idx));
@@ -648,6 +668,34 @@ async function renderHome() {
       if (pool.length >= 6) break;
     }
   }
+  if (!pool.length) {
+    pool.push(
+      {
+        slug: 'moana-2026',
+        name: 'Hành Trình Của Moana',
+        origin_name: 'MOANA',
+        year: 2026,
+        quality: '4K Vietsub',
+        lang: 'Vietsub',
+        tmdb_vote_average: 9.6,
+        poster_url: 'https://wsrv.nl/?url=https://image.tmdb.org/t/p/w780/mQBou6sOsy71qN4h0t06jZ7mU2d.jpg',
+        hero_backdrop_url: 'https://wsrv.nl/?url=https://image.tmdb.org/t/p/original/tElnmtQ6yz1PjN1kePNl8yMSb59.jpg',
+        content: 'Moana tiếp tục cuộc hành trình vĩ đại vượt qua đại dương cùng Á thần Maui và thủy thủ đoàn mới để giải cứu hòn đảo cổ xưa.'
+      },
+      {
+        slug: 'bac-si-x-phim-dien-anh',
+        name: 'Doctor-X: Phim Điện Ảnh',
+        origin_name: 'Doctor-X The Movie',
+        year: 2024,
+        quality: 'FHD',
+        lang: 'Vietsub',
+        tmdb_vote_average: 9.2,
+        poster_url: 'https://wsrv.nl/?url=https://image.tmdb.org/t/p/w780/kCqP6bV0OomC6qGgD5O4H0pQ4Qp.jpg',
+        hero_backdrop_url: 'https://wsrv.nl/?url=https://image.tmdb.org/t/p/original/3V48nO0p4p5d1c3z.jpg',
+        content: 'Bác sĩ phẫu thuật tự do Daimon Michiko tiếp tục bước vào những ca mổ bất khả thi tại bệnh viện đại học hàng đầu Nhật Bản.'
+      }
+    );
+  }
   if (hero && pool.length) {
     hero.querySelector('.hero__bg').innerHTML = pool.map(m => `<img src="${esc(bgUrl(m))}" alt="" onerror="this.style.display='none'">`).join('');
     hero.querySelector('.boot')?.remove();
@@ -655,6 +703,7 @@ async function renderHome() {
     hero.querySelector('.hero__nav').innerHTML = pool.map((_, i) => `<button aria-label="Slide ${i + 1}"${i ? '' : ' class="on"'}></button>`).join('');
     initHero();
   } else if (hero) {
+    hero.querySelector('.boot')?.remove();
     hero.innerHTML = emptyBox('Không tải được dữ liệu phim.');
   }
 
@@ -2567,55 +2616,66 @@ function renderBanner() {
 }
 
 /* ---------------- router ---------------- */
-function route() {
-  renderBanner();
-  renderNotifStrip();
-  const params = new URLSearchParams(location.search);
-  const seg = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-  const [a, b] = seg;
+async function route() {
+  try {
+    renderBanner();
+    renderNotifStrip();
+    const params = new URLSearchParams(location.search);
+    const seg = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    const [a, b] = seg;
 
-  document.querySelectorAll('.menu a').forEach(el => {
-    el.classList.toggle('on', el.getAttribute('href') === location.pathname);
-  });
-  document.getElementById('menu')?.classList.remove('open');
-
-  if (!seg.length || a === 'index.html') return renderHome();
-  if (a === 'phim' && b === 'trang' && seg[2]) return renderCollection({ title: 'Toàn bộ kho phim', params: {}, base: '/phim', page: seg[2], crumbsParts: [{ text: 'Trang chủ', href: '/' }, { text: 'Kho phim' }] });
-  if (a === 'phim' && b) return renderDetail(b);
-  if (a === 'phim') return renderCollection({ title: 'Toàn bộ kho phim', params: {}, base: '/phim', page: params.get('page'), crumbsParts: [{ text: 'Trang chủ', href: '/' }, { text: 'Kho phim' }] });
-  if (a === 'xem-phim' && b) return renderWatch(b, params);
-  if (a === 'xem' && b) return go('/xem-phim/' + b + location.search, true);
-  if (a === 'review-phim' && b) return renderBlog(b).then(ok => { if (ok === false) go('/phim/' + b, true); });
-  if (a === 'noi-dung-phim' && b) return renderSynopsis(b);
-  if (a === 'download-phim' && b) return renderDownload(b);
-  if (a === 'danh-sach' && b) return renderList('danh-sach', b, params.get('page'));
-  if (a === 'the-loai' && b) return renderList('the-loai', b, params.get('page'));
-  if (a === 'quoc-gia' && b) return renderList('quoc-gia', b, params.get('page'));
-  if (a === 'kho-phim' && b === 'trang' && seg[2]) return renderCollection({ title: 'Toàn bộ kho phim', params: {}, base: '/kho-phim/trang', page: seg[2], crumbsParts: [{ text: 'Trang chủ', href: '/' }, { text: 'Kho phim' }], pagerFor: p => `/kho-phim/trang/${p}`, canonPath: p => `/kho-phim/trang/${p}` });
-  if (a === 'tim-kiem') return renderSearch(params);
-  if (a === 'search') return renderSearch(params);
-  if (a === 'loc-phim' || a === 'filter') return renderFilter(params);
-  if (a === 'dien-vien' && b) return renderActorSlug(b);
-  if (a === 'dien-vien') return renderActors(params);
-  if (a === 'yeu-thich') return renderFavorites();
-  if (a === 'theo-doi' || a === 'thong-bao') return renderFollowPage();
-  if (a === 'lich-su') return renderHistory();
-  if (a === 'blog') return renderBlog(b);
-  if (a === 'admin') return adminCtx(b || 'overview');
-  if (a === 'xem-phim') return renderHome();
-  if (STATIC[a] && !b) return renderStatic(a);
-  if (!b && LANDINGS[a]) {
-    const landing = LANDINGS[a];
-    return renderCollection({
-      title: landing.t,
-      params: landing.q,
-      base: '/' + a,
-      page: params.get('page'),
-      crumbsParts: [{ text: 'Trang chủ', href: '/' }, { text: landing.t }],
+    document.querySelectorAll('.menu a').forEach(el => {
+      el.classList.toggle('on', el.getAttribute('href') === location.pathname);
     });
+    document.getElementById('menu')?.classList.remove('open');
+
+    if (!seg.length || a === 'index.html') return await renderHome();
+    if (a === 'phim' && b === 'trang' && seg[2]) return await renderCollection({ title: 'Toàn bộ kho phim', params: {}, base: '/phim', page: seg[2], crumbsParts: [{ text: 'Trang chủ', href: '/' }, { text: 'Kho phim' }] });
+    if (a === 'phim' && b) return await renderDetail(b);
+    if (a === 'phim') return await renderCollection({ title: 'Toàn bộ kho phim', params: {}, base: '/phim', page: params.get('page'), crumbsParts: [{ text: 'Trang chủ', href: '/' }, { text: 'Kho phim' }] });
+    if (a === 'xem-phim' && b) return await renderWatch(b, params);
+    if (a === 'xem' && b) return go('/xem-phim/' + b + location.search, true);
+    if (a === 'review-phim' && b) return renderBlog(b).then(ok => { if (ok === false) go('/phim/' + b, true); });
+    if (a === 'noi-dung-phim' && b) return await renderSynopsis(b);
+    if (a === 'download-phim' && b) return await renderDownload(b);
+    if (a === 'danh-sach' && b) return await renderList('danh-sach', b, params.get('page'));
+    if (a === 'the-loai' && b) return await renderList('the-loai', b, params.get('page'));
+    if (a === 'quoc-gia' && b) return await renderList('quoc-gia', b, params.get('page'));
+    if (a === 'kho-phim' && b === 'trang' && seg[2]) return await renderCollection({ title: 'Toàn bộ kho phim', params: {}, base: '/kho-phim/trang', page: seg[2], crumbsParts: [{ text: 'Trang chủ', href: '/' }, { text: 'Kho phim' }], pagerFor: p => `/kho-phim/trang/${p}`, canonPath: p => `/kho-phim/trang/${p}` });
+    if (a === 'tim-kiem') return await renderSearch(params);
+    if (a === 'search') return await renderSearch(params);
+    if (a === 'loc-phim' || a === 'filter') return await renderFilter(params);
+    if (a === 'dien-vien' && b) return await renderActorSlug(b);
+    if (a === 'dien-vien') return await renderActors(params);
+    if (a === 'yeu-thich') return await renderFavorites();
+    if (a === 'theo-doi' || a === 'thong-bao') return await renderFollowPage();
+    if (a === 'lich-su') return await renderHistory();
+    if (a === 'blog') return await renderBlog(b);
+    if (a === 'admin') return adminCtx(b || 'overview');
+    if (a === 'xem-phim') return await renderHome();
+    if (STATIC[a] && !b) return await renderStatic(a);
+    if (!b && LANDINGS[a]) {
+      const landing = LANDINGS[a];
+      return await renderCollection({
+        title: landing.t,
+        params: landing.q,
+        base: '/' + a,
+        page: params.get('page'),
+        crumbsParts: [{ text: 'Trang chủ', href: '/' }, { text: landing.t }],
+      });
+    }
+    document.title = 'Không tìm thấy trang – KhoPhim';
+    app.innerHTML = `<div class="pagehead"><h1>404</h1><p>Không tìm thấy trang <code>${esc(location.pathname)}</code>.</p><a class="btn btn--ghost" href="/">Về trang chủ</a></div>`;
+  } catch (err) {
+    console.error('Route fatal error:', err);
+    document.querySelector('.boot')?.remove();
+    app.innerHTML = `<div class="pagehead" style="text-align:center;padding:80px 20px;">
+      <h2>Không thể tải nội dung</h2>
+      <p style="color:var(--text-sub);margin:16px 0 24px;">Đã xảy ra sự cố kết nối máy chủ dữ liệu rạp phim (${esc(err.message || 'Lỗi mạng')}).</p>
+      <button class="btn btn--primary" onclick="location.reload()">Tải lại trang</button>
+      <a class="btn btn--ghost" href="/" style="margin-left:12px;">Về trang chủ</a>
+    </div>`;
   }
-  document.title = 'Không tìm thấy trang – KhoPhim';
-  app.innerHTML = `<div class="pagehead"><h1>404</h1><p>Không tìm thấy trang <code>${esc(location.pathname)}</code>.</p><a class="btn btn--ghost" href="/">Về trang chủ</a></div>`;
 }
 
 /* ---------------- header ---------------- */
@@ -2733,8 +2793,10 @@ setTimeout(initCinemaUI, 150);
 /* kiểm tra tập mới của phim đang theo dõi (một lần mỗi phiên) */
 if (followedMovies().length) setTimeout(() => { checkFollowedEpisodes(); }, 1200);
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    for (const r of regs) r.unregister();
+  }).catch(() => {});
 }
 
 

@@ -18,18 +18,36 @@
 <link rel="preconnect" href="https://phimapi.com">
 <link rel="preconnect" href="https://phimimg.com">
 <link rel="preconnect" href="https://ceoxbhsdodllziyxmbqr.supabase.co">
-<link rel="stylesheet" href="/assets/style.css?v=20261111_cinema_clean">
+<link rel="stylesheet" href="/assets/style.css?v=20261111_v14_clean_final">
 <script>
-  /* Tự động dọn dẹp cache và Service Worker cũ để đảm bảo giao diện mới nhất */
-  if ('caches' in window) {
-    caches.keys().then(keys => {
-      keys.forEach(k => {
-        if (k !== 'kp-shell-v12-clean-cinema') caches.delete(k);
-      });
-    });
-  }
-  document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.floating-dynamic-island').forEach(el => el.remove());
+  /* HỦY DIỆT TRIỆT ĐỂ MỌI SERVICE WORKER VÀ CACHE CŨ ĐỂ KHÔNG BAO GIỜ BỊ KẸT MÀN HÌNH XOAY */
+  (function() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for (var i = 0; i < registrations.length; i++) {
+          registrations[i].unregister();
+        }
+      }).catch(function() {});
+    }
+    if ('caches' in window) {
+      caches.keys().then(function(keys) {
+        for (var i = 0; i < keys.length; i++) {
+          caches.delete(keys[i]);
+        }
+      }).catch(function() {});
+    }
+    // Dọn dẹp cache localStorage cũ của Supabase nếu bị kẹt
+    try {
+      var toRemove = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.startsWith('sb4:')) toRemove.push(k);
+      }
+      toRemove.forEach(function(k) { localStorage.removeItem(k); });
+    } catch(e) {}
+  })();
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.floating-dynamic-island').forEach(function(el) { el.remove(); });
   });
 </script>
 </head>
@@ -153,6 +171,6 @@
   </div>
 </footer>
 
-<script type="module" src="/assets/app.js?v=20261111_cinema_clean"></script>
+<script type="module" src="/assets/app.js?v=20261111_v14_clean_final"></script>
 </body>
 </html>
