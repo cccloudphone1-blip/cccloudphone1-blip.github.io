@@ -35,15 +35,15 @@ const TYPES = {
 };
 
 const GENRES = {
-  'hanh-dong': 'Hành Động', 'tinh-cam': 'Tình Cảm', 'hai-huoc': 'Hài Hước', 'hai': 'Hài',
+  'hanh-dong': 'Hành Động', 'tinh-cam': 'Tình Cảm', 'hai-huoc': 'Hài Hước',
   'co-trang': 'Cổ Trang', 'tam-ly': 'Tâm Lý', 'kinh-di': 'Kinh Dị', 'vien-tuong': 'Viễn Tưởng',
   'phieu-luu': 'Phiêu Lưu', 'chien-tranh': 'Chiến Tranh', 'hinh-su': 'Hình Sự', 'gia-dinh': 'Gia Đình',
   'lich-su': 'Lịch Sử', 'bi-an': 'Bí Ẩn', 'vo-thuat': 'Võ Thuật', 'than-thoai': 'Thần Thoại',
   'hoc-duong': 'Học Đường', 'am-nhac': 'Âm Nhạc', 'kinh-dien': 'Kinh Điển', 'tai-lieu': 'Tài Liệu',
   'the-thao': 'Thể Thao', 'khoa-hoc': 'Khoa Học', 'chinh-kich': 'Chính Kịch', 'lang-man': 'Lãng Mạn',
   'toi-pham': 'Tội Phạm', 'gia-tuong': 'Giả Tưởng', 'khoa-hoc-vien-tuong': 'Khoa Học Viễn Tưởng',
-  'hoat-hinh': 'Hoạt Hình', 'dam-my': 'Đam Mỹ', 'bl': 'BL / Đam Mỹ', 'gl': 'GL / Bách Hợp',
-  'bach-hop': 'Bách Hợp', 'phim-hai': 'Phim Hài', 'phim-nhac': 'Phim Nhạc',
+  'hoat-hinh': 'Hoạt Hình', 'dam-my': 'Đam Mỹ',
+  'bach-hop': 'Bách Hợp', 'phim-nhac': 'Phim Nhạc',
 };
 
 const COUNTRIES = {
@@ -54,7 +54,7 @@ const COUNTRIES = {
   'ba-lan': 'Ba Lan', 'brazil': 'Brazil', 'mexico': 'Mexico', 'indonesia': 'Indonesia',
   'malaysia': 'Malaysia', 'philippines': 'Philippines', 'tho-nhi-ky': 'Thổ Nhĩ Kỳ',
   'thuy-dien': 'Thụy Điển', 'na-uy': 'Na Uy', 'dan-mach': 'Đan Mạch', 'ha-lan': 'Hà Lan',
-  'bo-dao-nha': 'Bồ Đào Nha', 'chau-phi': 'Châu Phi', 'quoc-gia-khac': 'Quốc Gia Khác',
+  'bo-dao-nha': 'Bồ Đào Nha', 'quoc-gia-khac': 'Quốc Gia Khác',
 };
 
 /* Trang SEO phẳng của site gốc → query tương ứng */
@@ -119,6 +119,33 @@ const plain = (h = '') => String(h).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' '
 const cleanName = s => String(s || '').replace(/\s+/g, ' ').trim();
 const term = q => String(q || '').replace(/[*,()]/g, ' ').trim();
 const num = n => Number(n).toLocaleString('vi-VN');
+
+/* QA 2026-11-11: poster fallback (local placeholder, no external dependency),
+   list dedupe, distinct-episode counting, fetch timeout for live sources. */
+const POSTER_FALLBACK = '/brand/poster-placeholder.svg';
+const posterUrl = m => { const u = String((m && (m.poster_url || m.thumb_url)) || '').trim(); return u && u !== 'null' ? u : POSTER_FALLBACK; };
+const POSTER_ONERROR = "this.onerror=null;this.src='" + POSTER_FALLBACK + "';this.classList.add('ph')";
+/* Same movie can appear 2-4x in one Supabase/live result (same slug, or same
+   normalised name+year from different sources). Keep the first occurrence. */
+const dedupeMovies = rows => {
+  const seen = new Set(); const out = [];
+  for (const m of rows || []) {
+    if (!m) continue;
+    const key = m.slug || m.id || (String(m.name || '').trim().toLowerCase() + '|' + (m.year || ''));
+    if (seen.has(key)) continue;
+    seen.add(key); out.push(m);
+  }
+  return out;
+};
+/* Episode count = distinct episode numbers across ALL servers.
+   Counting server entries (the old behaviour) counted sources as episodes
+   (e.g. 10 VSMOV sources for 1 episode showed as "10 tập"). */
+const distinctEpisodeCount = servers => new Set((servers || []).flatMap(sv => (sv.eps || []).map(e => e.num))).size;
+const fetchWithTimeout = (url, opts = {}, ms = 8000) => {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+};
 
 /* ---------------- SEO head ---------------- */
 const SITE = () => location.origin;
@@ -307,7 +334,7 @@ function card(m) {
   const rate = rating(m);
   return `<a class="card" href="/phim/${esc(m.slug)}">
     <div class="card__img">
-      <img src="${esc(m.poster_url || m.thumb_url || '')}" alt="${esc(m.name)}" loading="lazy" onerror="this.classList.add('ph')">
+      <img src="${esc(posterUrl(m))}" alt="${esc(m.name)}" loading="lazy" onerror="${POSTER_ONERROR}">
       ${rate ? `<span class="card__rate">★ ${rate.toFixed(1)}</span>` : ''}
       ${m.quality ? `<span class="card__q">${esc(m.quality)}</span>` : ''}
       ${m.episode_current ? `<span class="card__ep">${esc(m.episode_current)}</span>` : ''}
@@ -317,8 +344,8 @@ function card(m) {
     <div class="card__sub">${esc(m.origin_name || '')}${m.year ? ' · ' + m.year : ''}</div>
   </a>`;
 }
-const gridHtml = rows => `<div class="grid">${rows.map(card).join('')}</div>`;
-const rowHtml = rows => `<div class="row">${rows.map(card).join('')}</div>`;
+const gridHtml = rows => `<div class="grid">${dedupeMovies(rows).map(card).join('')}</div>`;
+const rowHtml = rows => `<div class="row">${dedupeMovies(rows).map(card).join('')}</div>`;
 
 function pager(page, total, hrefFor) {
   if (!total || total < 2) return '';
@@ -550,7 +577,7 @@ async function renderHome() {
     if (!cw.length) cwEl.remove();
     else cwEl.innerHTML = `<div class="section__head"><h2>Xem tiếp</h2><a href="/lich-su">Lịch sử →</a></div>
       <div class="row">${cw.map(h => `<a class="card" style="flex:0 0 176px" href="/xem-phim/${esc(h.slug)}?sv=${h.sv || 0}&ep=${h.epIndex || 0}">
-        <div class="card__img"><img src="${esc(h.poster)}" alt="${esc(h.name)}" loading="lazy" onerror="this.classList.add('ph')">
+        <div class="card__img"><img src="${esc(h.poster)}" alt="${esc(h.name)}" loading="lazy" onerror="this.onerror=null;this.src='/brand/poster-placeholder.svg';this.classList.add('ph')">
           <span class="card__ep">${esc(h.epName || '')}</span><span class="card__play"><span>▶</span></span></div>
         <div class="card__name">${esc(h.name)}</div>
         <div class="card__sub">${esc(h.svName || '')}${h.year ? ' · ' + h.year : ''}</div></a>`).join('')}</div>`;
@@ -569,7 +596,7 @@ async function renderHome() {
       row.innerHTML = `<div class="boot" style="min-height:120px"><div class="boot__spin"></div><p>Đang tải...</p></div>`;
       try {
         const { rows: list } = await api('movies', { ...BASE, select: CARD_FIELDS, country: `cs.[{"slug":"${btn.dataset.slug}"}]`, order: NEWEST, limit: 14 });
-        row.innerHTML = list.length ? list.map(card).join('') : emptyBox('Không có phim.');
+        row.innerHTML = list.length ? dedupeMovies(list).map(card).join('') : emptyBox('Không có phim.');
         const link = cEl.querySelector('.section__head a');
         if (link) link.setAttribute('href', '/quoc-gia/' + btn.dataset.slug);
       } catch {
@@ -620,7 +647,7 @@ function bindLoadMore({ params, pageNum, totalPages }) {
       const next = page + 1;
       const res = await api('movies', { ...BASE, select: CARD_FIELDS, order: NEWEST, ...params }, { page: next, paged: true });
       const box = document.querySelector('#gridBox .grid');
-      if (box && res.rows.length) box.insertAdjacentHTML('beforeend', res.rows.map(card).join(''));
+      if (box && res.rows.length) box.insertAdjacentHTML('beforeend', dedupeMovies(res.rows).map(card).join(''));
       page = next;
       if (page >= totalPages) btn.remove();
       else {
@@ -710,7 +737,7 @@ function renderList(kind, slug, page) {
 /* ---------------- Cứu nguồn Live từ VSMOV + PhimAPI + Nguồn C ---------------- */
 async function fetchVsmovMovie(slug) {
   try {
-    const res = await fetch(`https://vsmov.com/api/phim/${encodeURIComponent(slug)}`, {
+    const res = await fetchWithTimeout(`https://vsmov.com/api/phim/${encodeURIComponent(slug)}`, {
       headers: { accept: 'application/json' },
     });
     if (!res.ok) return null;
@@ -770,7 +797,7 @@ async function fetchVsmovMovie(slug) {
 
 async function fetchPhimapiMovie(slug) {
   try {
-    const res = await fetch(`https://phimapi.com/phim/${encodeURIComponent(slug)}`, {
+    const res = await fetchWithTimeout(`https://phimapi.com/phim/${encodeURIComponent(slug)}`, {
       headers: { accept: 'application/json' },
     });
     if (!res.ok) return null;
@@ -878,7 +905,7 @@ async function fetchLiveStreams(slug) {
   /* Ưu tiên 3: Nguồn C Live */
   const pNguonC = (async () => {
     try {
-      const resC = await fetch(`https://phim.nguonc.com/api/film/${encodeURIComponent(slug)}`, {
+      const resC = await fetchWithTimeout(`https://phim.nguonc.com/api/film/${encodeURIComponent(slug)}`, {
         headers: { accept: 'application/json' },
       });
       if (resC.ok) {
@@ -1008,6 +1035,12 @@ async function loadMovie(slug) {
     }
   } catch {}
 
+  /* QA 2026-11-11: drop servers whose every episode is on a known-dead host
+     (kkphimplayer7 / streamc / dailymotion — blocked, never playable) instead
+     of showing them and letting the player get stuck on them. */
+  const playableList = list.filter(s => s.eps.some(e => !isDead(e.embed || e.m3u8 || e.link)));
+  if (playableList.length !== list.length) list.splice(0, list.length, ...playableList);
+
   /* Tự động cứu nguồn thời gian thực nếu database không có tập nào hoặc tất cả server đều chết */
   const hasPlayable = list.some(s => s.eps.some(e => !isDead(e.embed || e.m3u8 || e.link)));
   if (!hasPlayable || list.length === 0) {
@@ -1025,8 +1058,8 @@ async function loadMovie(slug) {
     if (aDead !== bDead) return aDead - bDead;
     const isVsmovA = /vsmov/i.test(a.name) || (a.eps[0] && /vsmov/i.test(a.eps[0].embed || a.eps[0].link || ''));
     const isVsmovB = /vsmov/i.test(b.name) || (b.eps[0] && /vsmov/i.test(b.eps[0].embed || b.eps[0].link || ''));
-    const scoreA = (isVsmovA ? 60 : 0) + (/vietsub/i.test(a.name) ? 15 : 0) + (/thuyết minh/i.test(a.audio + a.name) ? 5 : 0);
-    const scoreB = (isVsmovB ? 60 : 0) + (/vietsub/i.test(b.name) ? 15 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0);
+    const scoreA = (isVsmovA ? 60 : 0) + (/vietsub/i.test(a.name) ? 15 : 0) + (/thuyết minh/i.test(a.audio + a.name) ? 5 : 0) + (/phimapi/i.test(a.name) ? -25 : 0);
+    const scoreB = (isVsmovB ? 60 : 0) + (/vietsub/i.test(b.name) ? 15 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0) + (/phimapi/i.test(b.name) ? -25 : 0);
     return scoreB - scoreA || b.eps.length - a.eps.length;
   });
 
@@ -1037,10 +1070,10 @@ async function loadMovie(slug) {
 
 function typeLabel(t) {
   const s = String(t || '');
-  if (s.includes('single') || s.includes('phim-le')) return { text: 'Phim lẻ', href: '/phim-le' };
-  if (s.includes('hoathinh') || s.includes('animation')) return { text: 'Hoạt hình', href: '/hoat-hinh' };
-  if (s.includes('tvshow')) return { text: 'TV Shows', href: '/tv-shows' };
-  return { text: 'Phim bộ', href: '/phim-bo' };
+  if (s.includes('single') || s.includes('phim-le')) return { text: 'Phim lẻ', href: '/danh-sach/phim-le' };
+  if (s.includes('hoathinh') || s.includes('animation')) return { text: 'Hoạt hình', href: '/danh-sach/hoat-hinh' };
+  if (s.includes('tvshow')) return { text: 'TV Shows', href: '/danh-sach/tv-shows' };
+  return { text: 'Phim bộ', href: '/danh-sach/phim-bo' };
 }
 
 function metaChips(m) {
@@ -1110,7 +1143,7 @@ async function renderDetail(slug) {
     return;
   }
   const { movie: m, servers } = data;
-  const totalEp = servers.reduce((a, s) => a + s.eps.length, 0);
+  const totalEp = distinctEpisodeCount(servers);
   const tl = typeLabel(m.type);
   const summary = plain(m.content || '').slice(0, 157);
   const isSeries = totalEp > 1;
@@ -1147,7 +1180,7 @@ async function renderDetail(slug) {
     <div class="detail__bg"><img src="${esc(bgUrl(m))}" alt="" onerror="this.style.display='none'"></div>
     <div class="detail__inner">
       <div class="detail__poster">
-        <img src="${esc(m.poster_url || m.thumb_url || '')}" alt="${esc(m.name)}" onerror="this.style.visibility='hidden'">
+        <img src="${esc(posterUrl(m))}" alt="${esc(m.name)}" onerror="${POSTER_ONERROR}">
         ${totalEp ? `<a class="btn btn--primary" href="/xem-phim/${esc(m.slug)}">▶ Xem phim</a>` : ''}
         <div class="detail__acts">${favButton(m)}${followButton(m)}</div>
       </div>
@@ -1174,7 +1207,7 @@ async function renderDetail(slug) {
   <section class="player" id="playerBox"><div class="player__box"></div></section>
 
   <section class="eps">
-    <div class="section__head"><h2>Danh sách tập</h2><span class="chip">${totalEp} tập</span></div>
+    <div class="section__head"><h2>Danh sách tập</h2><span class="chip">${totalEp} tập · ${servers.length} nguồn</span></div>
     <div class="eps__server" id="epsServer"></div>
     <div class="eps__grid" id="epsGrid"></div>
   </section>
@@ -1234,13 +1267,13 @@ async function renderWatch(slug, params) {
   const { movie: m, servers } = data;
   setHead({
     title: `Xem ${m.name} (${m.year || ''}) Vietsub | ${SITE_NAME}`,
-    description: `Xem phim ${m.name} ${m.origin_name ? '(' + m.origin_name + ') ' : ''}${m.year || ''} Vietsub chất lượng cao, ${servers.reduce((a, s) => a + s.eps.length, 0)} tập trên KhoPhim.`,
+    description: `Xem phim ${m.name} ${m.origin_name ? '(' + m.origin_name + ') ' : ''}${m.year || ''} Vietsub chất lượng cao, ${distinctEpisodeCount(servers)} tập trên KhoPhim.`,
     path: `/xem-phim/${m.slug}`,
     image: m.poster_url || m.thumb_url || '',
     type: 'video.movie',
     jsonld: breadcrumbLD([{ name: SITE_NAME, path: '/' }, { name: m.name, path: '/phim/' + m.slug }, { name: 'Xem phim', path: '/xem-phim/' + m.slug }]),
   });
-  const totalEp = servers.reduce((a, s) => a + s.eps.length, 0);
+  const totalEp = distinctEpisodeCount(servers);
 
   app.innerHTML = `
   <div class="watch">
@@ -1261,7 +1294,7 @@ async function renderWatch(slug, params) {
       </div>
     </div>
     <section class="eps">
-      <div class="section__head"><h2>Danh sách tập</h2><span class="chip">${totalEp} tập</span></div>
+      <div class="section__head"><h2>Danh sách tập</h2><span class="chip">${totalEp} tập · ${servers.length} nguồn</span></div>
       <div class="eps__server" id="epsServer"></div>
       <div class="eps__grid" id="epsGrid"></div>
     </section>
@@ -1544,6 +1577,15 @@ function mountEpisodes(movie, servers, state) {
         vid.appendChild(tr);
       }
       mountPlayerCtl(vid, item);
+      /* QA: a stream that never produces metadata (stuck "Đang tải…") must
+         fall back like a failed stream instead of hanging. */
+      const stallTimer = setTimeout(() => {
+        if (vid.isConnected && vid.readyState < 2) {
+          markDead(item.m3u8);
+          hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`);
+        }
+      }, 12000);
+      vid.addEventListener('loadedmetadata', () => clearTimeout(stallTimer), { once: true });
       attachHls(vid, item.m3u8, () => {
         markDead(item.m3u8);
         if (hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`)) {
@@ -1597,6 +1639,17 @@ function mountEpisodes(movie, servers, state) {
       }, () => markAlive(item.m3u8));
     } else {
       playerBox.innerHTML = `<iframe src="${esc(src)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
+      const frame = playerBox.querySelector('iframe');
+      /* QA: an embed that never loads (blocked host / dead embed) must fall
+         back instead of showing a blank player. */
+      let frameLoaded = false;
+      frame?.addEventListener('load', () => { frameLoaded = true; }, { once: true });
+      setTimeout(() => {
+        if (!frameLoaded && frame?.isConnected) {
+          markDead(src);
+          hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(innerUrl(src)))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`);
+        }
+      }, 12000);
       mountPlayerCtl(null, item);
       markAlive(src);
       notice('');
@@ -1688,7 +1741,10 @@ function mountEpisodes(movie, servers, state) {
 
 /* ---------------- search + filter ---------------- */
 function searchForm(values = {}) {
-  const opt = (map, val, ph) => `<option value="">${ph}</option>` + Object.entries(map).map(([s, n]) => `<option value="${s}"${val === s ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  const opt = (map, val, ph) => {
+    const seenLabel = new Set();
+    return `<option value="">${ph}</option>` + Object.entries(map).filter(([, n]) => !seenLabel.has(n) && seenLabel.add(n)).map(([s, n]) => `<option value="${s}"${val === s ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  };
   return `<form class="filterform" id="filterForm">
     <input type="search" name="q" value="${esc(values.q || '')}" placeholder="Tên phim...">
     <select name="type">${[['phim-bo', 'Phim bộ'], ['phim-le', 'Phim lẻ'], ['hoat-hinh', 'Hoạt hình']].reduce((a, [v, n], i) => a + `<option value="${v}"${values.type === v ? ' selected' : ''}>${n}</option>`, '<option value="">Loại phim</option>')}</select>
@@ -1871,7 +1927,7 @@ function renderFavorites() {
   app.innerHTML = `<div class="pagehead">${crumbs([{ text: 'Trang chủ', href: '/' }, { text: 'Yêu thích' }])}
       <h1>Phim yêu thích</h1><p>${list.length} phim</p></div>
     <section class="section" id="favWrap">${list.length ? `<div class="grid">${list.map(m => `<a class="card" href="/phim/${esc(m.slug)}">
-        <div class="card__img"><img src="${esc(m.poster)}" alt="${esc(m.name)}" loading="lazy" onerror="this.classList.add('ph')">
+        <div class="card__img"><img src="${esc(m.poster)}" alt="${esc(m.name)}" loading="lazy" onerror="this.onerror=null;this.src='/brand/poster-placeholder.svg';this.classList.add('ph')">
         <span class="card__ep">${esc(m.episode_current || '')}</span><span class="card__play"><span>▶</span></span></div>
         <div class="card__name">${esc(m.name)}</div><div class="card__sub">${esc(m.year || '')}</div></a>`).join('')}</div>` : emptyBox('Chưa có phim yêu thích. Bấm ♡ ở trang phim để lưu.')}</section>`;
   window.scrollTo(0, 0);
@@ -1883,7 +1939,7 @@ function renderHistory() {
   app.innerHTML = `<div class="pagehead">${crumbs([{ text: 'Trang chủ', href: '/' }, { text: 'Lịch sử' }])}
       <h1>Lịch sử xem</h1><p>${list.length} phim</p></div>
     <section class="section">${list.length ? `<div class="hist">${list.map(h => `<a class="hist__row" href="/xem-phim/${esc(h.slug)}?sv=${h.sv || 0}&ep=${h.epIndex || 0}">
-        <img src="${esc(h.poster)}" alt="" loading="lazy" onerror="this.classList.add('ph')">
+        <img src="${esc(h.poster)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/brand/poster-placeholder.svg';this.classList.add('ph')">
         <div><b>${esc(h.name)}</b><small>${esc(h.svName || '')} · ${esc(h.epName || '')}${h.year ? ' · ' + h.year : ''}</small></div>
         <span class="chip chip--red">Xem tiếp</span></a>`).join('')}</div>` : emptyBox('Chưa có lịch sử xem.')}</section>`;
   window.scrollTo(0, 0);
@@ -1934,7 +1990,7 @@ function renderStatic(slug) {
       .then(({ rows }) => {
         document.getElementById('schedList').innerHTML = rows.length
           ? `<div class="hist">${rows.map(m => `<a class="hist__row" href="/phim/${esc(m.slug)}">
-              <img src="${esc(m.poster_url || m.thumb_url || '')}" alt="" loading="lazy">
+              <img src="${esc(posterUrl(m))}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/brand/poster-placeholder.svg'">
               <div><b>${esc(m.name)}</b><small>${esc(m.next_episode_name || '')} · ${new Date(m.next_episode_at).toLocaleString('vi-VN')}</small></div>
               <span class="chip">${esc(m.episode_current || '')}</span></a>`).join('')}</div>`
           : emptyBox('Chưa có lịch phát sóng.');
@@ -2048,6 +2104,7 @@ async function renderBlog(slug) {
     try {
       const r = await fetchReview(slug);
       if (!r) throw new Error('not found');
+      if (location.pathname !== '/blog/' + slug) return; /* route changed while loading */
       const summary = plain(r.content || '').slice(0, 157);
       setHead({
         title: `${r.movie_name} – Giới thiệu & đánh giá | ${SITE_NAME}`,
@@ -2095,6 +2152,7 @@ async function renderBlog(slug) {
 
   try {
     const res = await api('movie_reviews', { select: RV_FIELDS, order: 'updated_at.desc' }, { page, per: 20, paged: true });
+    if (!document.getElementById('blogList')) return; /* route changed while loading */
     const rows = res.rows;
     if (!rows.length) throw new Error('empty');
     document.getElementById('blogList').innerHTML = `
@@ -2108,7 +2166,8 @@ async function renderBlog(slug) {
       </a>`).join('')}</div>
       ${pager(page, res.totalPages, p => `/blog${p > 1 ? '?page=' + p : ''}`)}`;
   } catch {
-    document.getElementById('blogList').innerHTML = emptyBox('Không tải được bài viết.');
+    const el = document.getElementById('blogList');
+    if (el) el.innerHTML = emptyBox('Không tải được bài viết.');
   }
   window.scrollTo(0, 0);
 }
@@ -2196,7 +2255,7 @@ function renderFollowPage() {
     </div>
     <section class="section">
       ${list.length ? `<div class="grid">${list.map(f => `<a class="card" href="/xem-phim/${esc(f.slug)}">
-        <div class="card__img"><img src="${esc(f.poster)}" alt="${esc(f.name)}" loading="lazy" onerror="this.classList.add('ph')">
+        <div class="card__img"><img src="${esc(f.poster)}" alt="${esc(f.name)}" loading="lazy" onerror="this.onerror=null;this.src='/brand/poster-placeholder.svg';this.classList.add('ph')">
           <span class="card__ep">${esc(f.ep || '')}</span></div>
         <div class="card__name">${esc(f.name)}</div>
         <div class="card__sub">${esc(f.year || '')}</div></a>`).join('')}</div>` : emptyBox('Chưa theo dõi phim nào. Bấm "Theo dõi" ở trang phim.')}
@@ -2372,7 +2431,7 @@ function bindHeader() {
         });
         if (!rows.length) { sug.hidden = true; return; }
         sug.innerHTML = rows.map(m => `<a href="/phim/${esc(m.slug)}">
-          <img src="${esc(m.poster_url || m.thumb_url || '')}" alt="" loading="lazy">
+          <img src="${esc(posterUrl(m))}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/brand/poster-placeholder.svg'">
           <span><b>${esc(m.name)}</b><small>${esc(m.origin_name || '')}${m.year ? ' · ' + m.year : ''}</small></span></a>`).join('');
         sug.hidden = false;
       } catch {}
@@ -2525,6 +2584,3 @@ function initCinemaUI() {
   }
 }
 
-addEventListener('popstate', () => { route(); setTimeout(initCinemaUI, 60); });
-route();
-setTimeout(initCinemaUI, 100);
