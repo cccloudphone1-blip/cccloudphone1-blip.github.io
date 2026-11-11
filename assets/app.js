@@ -140,11 +140,31 @@ const dedupeMovies = rows => {
   for (const m of rows || []) {
     if (!m) continue;
     const name = normTitle(m.name) || normTitle(m.origin_name);
-    const key = name && m.year
-      ? `t:${name}|${normTitle(m.origin_name)}|${m.year}|${String(m.type || '').toLowerCase()}`
-      : (m.slug || m.id || (String(m.name || '').trim().toLowerCase() + '|' + (m.year || '')));
-    if (seen.has(key)) continue;
-    seen.add(key); out.push(m);
+    /* Origin key with a bare franchise number stripped, and a duplicated
+       franchise prefix dropped ("Harry Potter 5: Harry Potter and the Order
+       of the Phoenix" -> "Harry Potter and the Order of the Phoenix"), so
+       the two Vietnamese titles for Part 5 collapse. "Part N" markers are
+       NOT stripped, so same-year Part 1 / Part 2 never collapse. */
+    let origin = normTitle(m.origin_name)
+      .replace(/^((?:\w+ ){1,2})\d+(?:\.\d+)?\s*[:\-]?\s*/, '$1');
+    const dupPrefix = /^((?:\w+ ){1,2})\1/.exec(origin);
+    if (dupPrefix) origin = origin.slice(dupPrefix[1].length);
+    origin = origin.replace(/\s+/g, ' ').trim();
+    const type = String(m.type || '').toLowerCase();
+    /* Collapse on EITHER the Vietnamese-title key OR the origin-title key
+       (PR #7): the same film also arrives under a different Vietnamese title
+       ("Mệnh Lệnh Phượng Hoàng" vs "Hội Phượng Hoàng", same year, same
+       origin) or a different origin title ("Harry Potter and the Half-Blood
+       Prince" vs "Harry Potter 6: Harry Potter And The Half-blood Prince") —
+       the old single key missed those, so the suggestion dropdown showed
+       "Hoàng Tử Lai" twice. Part markers stay in both keys, so different
+       parts never collapse. */
+    const keys = (name && m.year)
+      ? [`t:${name}|${m.year}|${type}`, ...(origin && origin !== name ? [`o:${origin}|${m.year}|${type}`] : [])]
+      : [(m.slug || m.id || (String(m.name || '').trim().toLowerCase() + '|' + (m.year || '')))];
+    if (keys.some(k => seen.has(k))) continue;
+    keys.forEach(k => seen.add(k));
+    out.push(m);
   }
   return out;
 };
@@ -2568,12 +2588,23 @@ function bindHeader() {
     tId = setTimeout(async () => {
       try {
         const t = term(q);
+        const qAtFetch = q;
         const { rows } = await api('movies', {
           ...BASE, select: 'slug,name,origin_name,year,poster_url,thumb_url',
-          or: `(name.ilike.*${t}*,origin_name.ilike.*${t}*)`, order: NEWEST, limit: 6,
+          or: `(name.ilike.*${t}*,origin_name.ilike.*${t}*)`, order: 'year.asc.nullslast', limit: 20,
         });
-        if (!rows.length) { sug.hidden = true; return; }
-        sug.innerHTML = rows.map(m => `<a href="/phim/${esc(m.slug)}">
+        /* Ignore a stale response if the user kept typing. */
+        if (input.value.trim() !== qAtFetch) return;
+        /* QA 2026-11-11 (PR #7): the suggestion dropdown used its own query
+           path (NEWEST order, limit 6, no dedupe), so after PR #6 fixed the
+           results page it still showed parts out of order with duplicates
+           (e.g. "Hoàng Tử Lai" 2009 twice, then Part 1, then Part 5). Reuse
+           the same series/part ordering + dedupe as the results page, then
+           show the first 6. Year-ascending server order makes sure the
+           earliest parts are inside the fetched window for big franchises. */
+        const list = sortSearchResults(rows).slice(0, 6);
+        if (!list.length) { sug.hidden = true; return; }
+        sug.innerHTML = list.map(m => `<a href="/phim/${esc(m.slug)}">
           <img src="${esc(posterUrl(m))}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/brand/poster-placeholder.svg'">
           <span><b>${esc(m.name)}</b><small>${esc(m.origin_name || '')}${m.year ? ' · ' + m.year : ''}</small></span></a>`).join('');
         sug.hidden = false;
