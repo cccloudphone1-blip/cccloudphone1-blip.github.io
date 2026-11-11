@@ -438,13 +438,21 @@ function recordHistory(m, epIndex, epName, sv, svName) {
 
 /* ---------------- cards ---------------- */
 const rating = m => Number(m.tmdb_vote_average || 0) || 0;
-const bgUrl = m => m.hero_backdrop_url || m.backdrop_url || m.thumb_url || m.poster_url || '';
+const safeImg = url => {
+  if (!url) return '';
+  if (url.includes('image.tmdb.org')) {
+    return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=600&q=85&output=webp`;
+  }
+  return url;
+};
+const bgUrl = m => safeImg(m.hero_backdrop_url || m.backdrop_url || m.thumb_url || m.poster_url || '');
 
 function card(m) {
   const rate = rating(m);
+  const poster = safeImg(m.poster_url || m.thumb_url || '');
   return `<a class="card" href="/phim/${esc(m.slug)}">
     <div class="card__img">
-      <img src="${esc(posterUrl(m))}" alt="${esc(m.name)}" loading="lazy" onerror="${POSTER_ONERROR}">
+      <img src="${esc(safeImg(posterUrl(m)))}" alt="${esc(m.name)}" loading="lazy" onerror="${POSTER_ONERROR}">
       ${rate ? `<span class="card__rate">★ ${rate.toFixed(1)}</span>` : ''}
       ${m.quality ? `<span class="card__q">${esc(m.quality)}</span>` : ''}
       ${m.episode_current ? `<span class="card__ep">${esc(m.episode_current)}</span>` : ''}
@@ -526,10 +534,10 @@ document.addEventListener('keydown', e => {
 function heroSlide(m, i) {
   const cats = (m.category || []).slice(0, 3).map(c => esc(c.name)).join(' · ');
   const rate = rating(m) || 9.4;
-  const bgImg = m.hero_backdrop_url || m.backdrop_url || m.thumb_url || m.poster_url || '';
+  const bgImg = safeImg(m.hero_backdrop_url || m.backdrop_url || m.thumb_url || m.poster_url || '');
   const isFirst = i === 0;
   return `<div class="cinematic-hero hero__inner" data-slide="${i}" ${isFirst ? '' : 'hidden'} style="display:${isFirst ? 'flex' : 'none'}">
-    <img class="hero-backdrop-img" src="${esc(bgImg)}" alt="${esc(m.name)}" onerror="this.src='https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1600&q=80'">
+    <img class="hero-backdrop-img" src="${esc(bgImg)}" alt="${esc(m.name)}" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1600&q=80'">
     <div class="hero-vignette-overlay"></div>
     <div class="hero-content">
       <div class="hero-badges-row">
@@ -630,22 +638,16 @@ async function renderHome() {
   const rows = r => (r.status === 'fulfilled' ? r.value.rows || [] : []);
 
   const hero = document.getElementById('hero');
-  const doctorXFeatured = {
-    name: 'Bác Sĩ X',
-    origin_name: 'Doctor X: Mafia in White',
-    slug: 'bac-si-x',
-    year: 2026,
-    quality: 'FHD',
-    lang: 'Vietsub VSMOV',
-    rate: 9.8,
-    episode_current: 'Trọn Bộ 10 Tập',
-    content: 'Daimon Michiko – nữ bác sĩ ngoại khoa tự do thiên tài với tuyên ngôn bất hủ "Tôi không bao giờ thất bại!". Đối đầu viện trưởng mới và các âm mưu đen tối trong giới y khoa cấp cao.',
-    poster_url: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&w=800&q=80',
-    hero_backdrop_url: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1600&q=80',
-    thumb_url: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&w=800&q=80',
-    category: [{ name: 'Y Khoa' }, { name: 'Chính Kịch' }, { name: 'Chiếu Rạp' }]
-  };
-  const pool = [doctorXFeatured, ...rows(latest).slice(0, 5)];
+  const heroCandidates = [...rows(rap), ...rows(latest)].filter(m => m && m.slug);
+  const seenHero = new Set();
+  const pool = [];
+  for (const m of heroCandidates) {
+    if (!seenHero.has(m.slug) && (m.hero_backdrop_url || m.backdrop_url || m.thumb_url || m.poster_url)) {
+      seenHero.add(m.slug);
+      pool.push(m);
+      if (pool.length >= 6) break;
+    }
+  }
   if (hero && pool.length) {
     hero.querySelector('.hero__bg').innerHTML = pool.map(m => `<img src="${esc(bgUrl(m))}" alt="" onerror="this.style.display='none'">`).join('');
     hero.querySelector('.boot')?.remove();
@@ -966,13 +968,49 @@ async function fetchPhimapiMovie(slug) {
   }
 }
 
-async function fetchLiveStreams(slug) {
-  const liveServers = [];
+function normalizeRoman(slug) {
+  if (!slug) return '';
+  return slug
+    .replace(/-viii-/g, '-8-')
+    .replace(/-vii-/g, '-7-')
+    .replace(/-vi-/g, '-6-')
+    .replace(/-iv-/g, '-4-')
+    .replace(/-iii-/g, '-3-')
+    .replace(/-ii-/g, '-2-')
+    .replace(/-v-/g, '-5-')
+    .replace(/-ix-/g, '-9-')
+    .replace(/-x-/g, '-10-');
+}
 
-  /* Ưu tiên 1: VSMOV API Live */
+async function fetchLiveStreams(slug, movieTitle, originName) {
+  const liveServers = [];
+  const cleanTitle = (movieTitle || originName || slug.replace(/-/g, ' '))
+    .replace(/[:\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  /* Ưu tiên 1: VSMOV API Live (HLS M3U8 Siêu Nhanh 4K) */
   const pVsmov = (async () => {
     try {
-      const v = await fetchVsmovMovie(slug);
+      let v = await fetchVsmovMovie(slug);
+      if (!v?.servers?.length) {
+        const norm = normalizeRoman(slug);
+        if (norm && norm !== slug) {
+          v = await fetchVsmovMovie(norm);
+        }
+      }
+      if (!v?.servers?.length && cleanTitle) {
+        const sRes = await fetch(`https://vsmov.com/api/tim-kiem?keyword=${encodeURIComponent(cleanTitle)}`, {
+          headers: { accept: 'application/json' },
+        });
+        if (sRes.ok) {
+          const sJson = await sRes.json();
+          const items = sJson?.data?.items || sJson?.items || [];
+          if (items.length && items[0].slug) {
+            v = await fetchVsmovMovie(items[0].slug);
+          }
+        }
+      }
       if (v?.servers?.length) liveServers.push(...v.servers);
     } catch {}
   })();
@@ -980,33 +1018,65 @@ async function fetchLiveStreams(slug) {
   /* Ưu tiên 2: PhimAPI Live */
   const pPhimapi = (async () => {
     try {
+      let pData = null;
       const res = await fetch(`https://phimapi.com/phim/${encodeURIComponent(slug)}`, {
         headers: { accept: 'application/json' },
       });
       if (res.ok) {
         const json = await res.json();
-        if (json?.status && Array.isArray(json?.episodes)) {
-          for (const s of json.episodes) {
-            const rawName = (s.server_name || 'Vietsub').trim();
-            const serverName = `PhimAPI · ${rawName}`;
-            const eps = (s.server_data || []).map((e, idx) => {
-              const embed = e.link_embed || '';
-              const m3u8 = e.link_m3u8 || '';
-              const link = m3u8 || embed;
-              const num = Number(e.slug || e.name || idx + 1) || (idx + 1);
-              return {
-                num,
-                name: e.name ? (String(e.name).toLowerCase().startsWith('tập') ? e.name : 'Tập ' + e.name) : 'Tập ' + num,
-                link, embed, m3u8,
-              };
-            }).filter(e => e.link);
-            if (eps.length) {
-              liveServers.push({
-                name: serverName,
-                audio: /thuyết minh/i.test(serverName) ? 'Thuyết minh' : 'Vietsub',
-                eps,
-              });
+        if (json?.status && Array.isArray(json?.episodes)) pData = json;
+      }
+      if (!pData) {
+        const norm = normalizeRoman(slug);
+        if (norm && norm !== slug) {
+          const rNorm = await fetch(`https://phimapi.com/phim/${encodeURIComponent(norm)}`, {
+            headers: { accept: 'application/json' },
+          });
+          if (rNorm.ok) {
+            const jNorm = await rNorm.json();
+            if (jNorm?.status && Array.isArray(jNorm?.episodes)) pData = jNorm;
+          }
+        }
+      }
+      if (!pData && cleanTitle) {
+        const pSearch = await fetch(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(cleanTitle)}&limit=5`, {
+          headers: { accept: 'application/json' },
+        });
+        if (pSearch.ok) {
+          const sJson = await pSearch.json();
+          const items = sJson?.data?.items || [];
+          if (items.length && items[0].slug) {
+            const rDetail = await fetch(`https://phimapi.com/phim/${encodeURIComponent(items[0].slug)}`, {
+              headers: { accept: 'application/json' },
+            });
+            if (rDetail.ok) {
+              const jDetail = await rDetail.json();
+              if (jDetail?.status && Array.isArray(jDetail?.episodes)) pData = jDetail;
             }
+          }
+        }
+      }
+      if (pData?.episodes) {
+        for (const s of pData.episodes) {
+          const rawName = (s.server_name || 'Vietsub').trim();
+          const serverName = `PhimAPI · ${rawName}`;
+          const eps = (s.server_data || []).map((e, idx) => {
+            const embed = e.link_embed || '';
+            const m3u8 = e.link_m3u8 || '';
+            const link = m3u8 || embed;
+            const num = Number(e.slug || e.name || idx + 1) || (idx + 1);
+            return {
+              num,
+              name: e.name ? (String(e.name).toLowerCase().startsWith('tập') ? e.name : 'Tập ' + e.name) : 'Tập ' + num,
+              link, embed, m3u8,
+            };
+          }).filter(e => e.link);
+          if (eps.length) {
+            liveServers.push({
+              name: serverName,
+              audio: /thuyết minh/i.test(serverName) ? 'Thuyết minh' : 'Vietsub',
+              eps,
+            });
           }
         }
       }
@@ -1146,22 +1216,23 @@ async function loadMovie(slug) {
     }
   } catch {}
 
-  /* QA 2026-11-11: drop servers whose every episode is on a known-dead host
-     (kkphimplayer7 / streamc / dailymotion — blocked, never playable) instead
-     of showing them and letting the player get stuck on them. */
+  /* Drop servers whose every episode is on a known-dead host */
   const playableList = list.filter(s => s.eps.some(e => !isDead(e.embed || e.m3u8 || e.link)));
   if (playableList.length !== list.length) list.splice(0, list.length, ...playableList);
 
-  /* Tự động cứu nguồn thời gian thực nếu database không có tập nào hoặc tất cả server đều chết */
-  const hasPlayable = list.some(s => s.eps.some(e => !isDead(e.embed || e.m3u8 || e.link)));
-  if (!hasPlayable || list.length === 0) {
-    try {
-      const liveList = await fetchLiveStreams(slug);
-      if (liveList && liveList.length) {
-        list.push(...liveList);
+  /* Tự động cứu nguồn thời gian thực: LUÔN LUÔN gọi Live Streams để lấy nguồn tươi mới */
+  try {
+    const liveList = await fetchLiveStreams(slug, movie?.name, movie?.origin_name);
+    if (liveList && liveList.length) {
+      const known = new Set(list.map(s => s.name.toLowerCase()));
+      for (const ls of liveList) {
+        if (!known.has(ls.name.toLowerCase())) {
+          list.push(ls);
+          known.add(ls.name.toLowerCase());
+        }
       }
-    } catch {}
-  }
+    }
+  } catch {}
 
   list.sort((a, b) => {
     const aDead = (a.eps[0] && isDead(a.eps[0].embed || a.eps[0].m3u8 || a.eps[0].link)) ? 1 : 0;
@@ -1169,8 +1240,12 @@ async function loadMovie(slug) {
     if (aDead !== bDead) return aDead - bDead;
     const isVsmovA = /vsmov/i.test(a.name) || (a.eps[0] && /vsmov/i.test(a.eps[0].embed || a.eps[0].link || ''));
     const isVsmovB = /vsmov/i.test(b.name) || (b.eps[0] && /vsmov/i.test(b.eps[0].embed || b.eps[0].link || ''));
-    const scoreA = (isVsmovA ? 60 : 0) + (/vietsub/i.test(a.name) ? 15 : 0) + (/thuyết minh/i.test(a.audio + a.name) ? 5 : 0) + (/phimapi/i.test(a.name) ? -25 : 0);
-    const scoreB = (isVsmovB ? 60 : 0) + (/vietsub/i.test(b.name) ? 15 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0) + (/phimapi/i.test(b.name) ? -25 : 0);
+    const isPhimapiA = /phimapi/i.test(a.name);
+    const isPhimapiB = /phimapi/i.test(b.name);
+    const scoreA = (isVsmovA ? 100 : 0) + (isPhimapiA ? 70 : 0) + (/vietsub/i.test(a.name) ? 15 : 0) + (/thuyết minh/i.test(a.audio + a.name) ? 5 : 0);
+    const scoreB = (isVsmovB ? 100 : 0) + (isPhimapiB ? 70 : 0) + (/vietsub/i.test(b.name) ? 15 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0);
+    return scoreB - scoreA || b.eps.length - a.eps.length;
+  });
     return scoreB - scoreA || b.eps.length - a.eps.length;
   });
 
@@ -1444,8 +1519,16 @@ async function renderWatch(slug, params) {
 /* ---------------- player (iframe + native HLS) ---------------- */
 /* nguồn bị chặn theo vùng: lưu localStorage, tự học khi phát lỗi */
 const DEAD_KEY = 'kp_dead_hosts';
-/* nguồn trả 404/CORS khi IP ngoài VN hoặc CDN chết — a.kvp726.com trả 404 hàng loạt */
-const DEAD_SEED = ['kkphimplayer7.com', 'v7.kkphimplayer7.com'];
+/* nguồn trả 404/CORS/403 khi IP ngoài VN hoặc CDN chết vĩnh viễn */
+const DEAD_SEED = [
+  'kkphimplayer7.com',
+  'v7.kkphimplayer7.com',
+  'a.kvp726.com',
+  'phim1280.tv',
+  'streamc.xyz',
+  'short.icu',
+  'dailymotion.com',
+];
 /* nguồn chặn nhúng iframe (X-Frame-Options / 403) */
 const NOFRAME = ['streamc.xyz', 'dailymotion.com', 'short.icu'];
 const DEAD_TTL = 6 * 3600 * 1000;

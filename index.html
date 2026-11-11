@@ -18,7 +18,20 @@
 <link rel="preconnect" href="https://phimapi.com">
 <link rel="preconnect" href="https://phimimg.com">
 <link rel="preconnect" href="https://ceoxbhsdodllziyxmbqr.supabase.co">
-<link rel="stylesheet" href="/assets/style.css?v=20261111_qa8">
+<link rel="stylesheet" href="/assets/style.css?v=20261111_cinema_clean">
+<script>
+  /* Tự động dọn dẹp cache và Service Worker cũ để đảm bảo giao diện mới nhất */
+  if ('caches' in window) {
+    caches.keys().then(keys => {
+      keys.forEach(k => {
+        if (k !== 'kp-shell-v12-clean-cinema') caches.delete(k);
+      });
+    });
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.floating-dynamic-island').forEach(el => el.remove());
+  });
+</script>
 </head>
 <body>
 
@@ -140,6 +153,6 @@
   </div>
 </footer>
 
-<script type="module" src="/assets/app.js?v=20261111_qa8"></script>
+<script type="module" src="/assets/app.js?v=20261111_cinema_clean"></script>
 </body>
 </html>
