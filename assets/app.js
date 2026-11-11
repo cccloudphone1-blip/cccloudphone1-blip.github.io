@@ -1366,13 +1366,21 @@ function retryDead(slug) {
   writeDead(d);
 }
 
-/* thanh điều khiển riêng: tốc độ / phụ đề / PiP — chỉ tác dụng với luồng HLS */
+/* thanh điều khiển riêng: tốc độ / phụ đề / PiP — chỉ tác dụng với luồng HLS.
+   Với nguồn nhúng (iframe VSMOV/PhimAPI...), tốc độ và phụ đề chỉ chỉnh được
+   trong menu Cài đặt của player nhúng, nên không hiện các nút của trang để
+   tránh gây nhầm lẫn — chỉ để lại dòng hướng dẫn. */
 function mountPlayerCtl(video, item) {
   const host = document.getElementById('playerBox');
   if (!host) return;
   host.querySelector('.pctl')?.remove();
   const bar = document.createElement('div');
   bar.className = 'pctl';
+  if (!video) {
+    bar.innerHTML = `<small class="pctl__hint">Nguồn nhúng — chỉnh tốc độ / phụ đề trong menu Cài đặt của trình phát bên dưới</small>`;
+    host.appendChild(bar);
+    return;
+  }
   bar.innerHTML = `
     <label>Tốc độ
       <select data-ctl="speed">${[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}"${v === 1 ? ' selected' : ''}>${v}×</option>`).join('')}</select>
@@ -1380,13 +1388,11 @@ function mountPlayerCtl(video, item) {
     ${item && item.sub ? `<label>Phụ đề
       <select data-ctl="sub"><option value="off">Tắt</option><option value="on">Vietsub</option></select>
     </label>` : ''}
-    ${video ? `<label>Chất lượng
+    <label>Chất lượng
       <select data-ctl="quality"><option value="-1" selected>Auto</option></select>
-    </label>` : ''}
-    <button type="button" data-ctl="pip">Ảnh trong ảnh</button>
-    ${video ? '' : '<small class="pctl__hint">Nguồn nhúng — tốc độ/phụ đề do player bên kia quản lý</small>'}`;
+    </label>
+    <button type="button" data-ctl="pip">Ảnh trong ảnh</button>`;
   host.appendChild(bar);
-  if (!video) return;
 
   const speed = bar.querySelector('[data-ctl="speed"]');
   speed.addEventListener('change', () => {
