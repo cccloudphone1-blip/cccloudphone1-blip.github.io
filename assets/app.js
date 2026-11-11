@@ -1144,6 +1144,17 @@ async function renderDetail(slug) {
   }
   const { movie: m, servers } = data;
   const totalEp = distinctEpisodeCount(servers);
+  /* QA 2026-11-11: "Xem phim" chỉ hiện khi thật sự có nguồn phát được.
+     totalEp > 0 vẫn có thể là toàn nguồn chết (host bị chặn) — khi đó ẩn
+     nút xem và ghi rõ "Chưa có nguồn xem" thay vì để người xem bấm vào
+     rồi chỉ thấy màn hình đen "Đang tải…". */
+  const srcOfEp = e => (e && (e.embed || e.m3u8 || e.link)) || '';
+  const hasPlayable = servers.some(s => s.eps.some(e => srcOfEp(e) && !isDead(srcOfEp(e))));
+  /* "Xem tập mới nhất" phải tới đúng tập cuối (số tập lớn nhất), không phải Tập 01. */
+  let latest = null;
+  servers.forEach((s, si) => s.eps.forEach((e, ei) => {
+    if (!latest || (e.num || 0) > (latest.num || 0)) latest = { sv: si, ep: ei, num: e.num || 0 };
+  }));
   const tl = typeLabel(m.type);
   const summary = plain(m.content || '').slice(0, 157);
   const isSeries = totalEp > 1;
@@ -1181,7 +1192,7 @@ async function renderDetail(slug) {
     <div class="detail__inner">
       <div class="detail__poster">
         <img src="${esc(posterUrl(m))}" alt="${esc(m.name)}" onerror="${POSTER_ONERROR}">
-        ${totalEp ? `<a class="btn btn--primary" href="/xem-phim/${esc(m.slug)}">▶ Xem phim</a>` : ''}
+        ${hasPlayable ? `<a class="btn btn--primary" href="/xem-phim/${esc(m.slug)}">▶ Xem phim</a>` : '<div class="notice-inline">Chưa có nguồn xem cho phim này.</div>'}
         <div class="detail__acts">${favButton(m)}${followButton(m)}</div>
       </div>
       <div class="detail__body">
@@ -1194,7 +1205,7 @@ async function renderDetail(slug) {
         ${m.notify ? `<div class="notice-inline">🔔 ${esc(String(m.notify).slice(0, 200))}</div>` : ''}
         <div class="btnrow">
           ${m.trailer_url ? `<button class="btn btn--ghost" type="button" id="trailerBtn" data-url="${esc(m.trailer_url)}">▶ Trailer</button>` : ''}
-          ${totalEp ? `<a class="btn btn--ghost" href="/xem-phim/${esc(m.slug)}">Xem tập mới nhất</a>` : ''}
+          ${latest ? `<a class="btn btn--ghost" href="/xem-phim/${esc(m.slug)}?sv=${latest.sv}&ep=${latest.ep}">Xem tập mới nhất</a>` : ''}
           <button class="btn btn--ghost" type="button" id="shareBtn" data-url="${esc(SITE() + '/phim/' + m.slug)}" data-title="${esc(m.name)}">Chia sẻ</button>
           <a class="btn btn--ghost" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(SITE() + '/phim/' + m.slug)}" target="_blank" rel="noopener">Facebook</a>
         </div>
@@ -1463,6 +1474,13 @@ async function attachHls(video, src, onFail, onOk) {
 }
 
 function mountEpisodes(movie, servers, state) {
+  /* QA 2026-11-11: hiện thời lượng tập (nếu catalog có) để khỏi nhầm tập
+     phim ngắn với trailer — ví dụ "Giấu Kín Tình Yêu" mỗi tập chỉ 11 phút. */
+  const formatDur = d => {
+    if (d == null || d === '') return '';
+    if (typeof d === 'number') return d >= 60 ? Math.round(d / 60) + ' phút' : d + ' giây';
+    return String(d).slice(0, 24);
+  };
   const serverBox = document.getElementById('epsServer');
   const playerBox = document.querySelector('#playerBox .player__box');
   if (!servers.length) {
@@ -1524,16 +1542,30 @@ function mountEpisodes(movie, servers, state) {
     el.hidden = !html;
   };
 
-  const showDead = (src, extra = '') => {
+  /* QA 2026-11-11: khi mọi nguồn của tập này đều đã thử và chết thì hiện
+     trạng thái lỗi cuối rõ ràng thay vì để màn hình đen "Đang tải…" mãi.
+     final=true: không còn nguồn thay thế — ghi rõ và cho thử tập khác /
+     về trang chi tiết, không lặp vòng qua các nguồn chết nữa. */
+  const showDead = (src, extra = '', final = false) => {
     const hosts = deadHostList();
-    playerBox.innerHTML = `<div class="player__err">Nguồn <b>${esc(hostOf(innerUrl(src)) || 'không rõ')}</b> không phát được${extra ? ' — ' + esc(extra) : ''}.<br>
+    playerBox.innerHTML = `<div class="player__err">${final
+      ? 'Nguồn phát hiện không xem được — thử đổi tập hoặc quay lại sau.'
+      : `Nguồn <b>${esc(hostOf(innerUrl(src)) || 'không rõ')}</b> không phát được${extra ? ' — ' + esc(extra) : ''}.`}<br>
       <div class="btnrow" style="justify-content:center">
-        <button type="button" class="btn btn--primary" id="tryNext">Thử nguồn khác</button>
+        ${final
+          ? `<button type="button" class="btn btn--primary" id="tryOtherEp">Thử tập khác</button>`
+          : `<button type="button" class="btn btn--primary" id="tryNext">Thử nguồn khác</button>`}
+        <a class="btn btn--ghost" href="/phim/${esc(movie.slug)}">Về trang chi tiết</a>
         <button type="button" class="btn btn--ghost" id="reportSrc">Báo nguồn lỗi</button>
       </div></div>`;
     document.getElementById('tryNext')?.addEventListener('click', () => {
       const np = seek(cur.sv, cur.ep + 1) || seek(cur.sv + 1, 0);
       if (!np) { notice(`Tất cả nguồn đều lỗi: ${esc(hosts.join(', '))}`); return; }
+      cur.sv = np.s; cur.ep = np.e; sync(); render();
+    });
+    document.getElementById('tryOtherEp')?.addEventListener('click', () => {
+      const np = seek(cur.sv, cur.ep + 1) || seek(0, 0);
+      if (!np) { notice('Tất cả các tập đều không có nguồn phát được.'); return; }
       cur.sv = np.s; cur.ep = np.e; sync(); render();
     });
     document.getElementById('reportSrc')?.addEventListener('click', () => {
@@ -1559,6 +1591,28 @@ function mountEpisodes(movie, servers, state) {
     return false;
   };
 
+  /* QA 2026-11-11: gắn iframe nhúng kèm hẹn giờ "kẹt tải" — nếu iframe
+     không load trong 12s thì coi như nguồn chết, nhảy nguồn khác; nếu
+     không còn nguồn nào thì hiện trạng thái lỗi cuối (showDead final)
+     thay vì để màn hình đen "Đang tải…" mãi. */
+  const mountEmbed = (src, item) => {
+    playerBox.innerHTML = `<iframe src="${esc(src)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
+    const frame = playerBox.querySelector('iframe');
+    let frameLoaded = false;
+    frame?.addEventListener('load', () => { frameLoaded = true; }, { once: true });
+    setTimeout(() => {
+      if (!frameLoaded && frame?.isConnected) {
+        markDead(src);
+        if (!hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(innerUrl(src)))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`)) {
+          showDead(src, 'không còn nguồn thay thế', true);
+        }
+      }
+    }, 12000);
+    mountPlayerCtl(null, item);
+    markAlive(src);
+    notice('');
+  };
+
   const render = () => {
     const server = servers[cur.sv];
     const item = server.eps[cur.ep];
@@ -1569,7 +1623,7 @@ function mountEpisodes(movie, servers, state) {
     } else if (isDead(src) && !retrying()) {
       markDead(src);
       if (!hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(innerUrl(src)))}</b> không phát được — đã chuyển nguồn khác.`)) {
-        showDead(src, 'không còn nguồn thay thế');
+        showDead(src, 'không còn nguồn thay thế', true);
       }
     } else if (item.m3u8) {
       playerBox.innerHTML = `<video class="player__video" controls playsinline preload="metadata"></video>`;
@@ -1588,7 +1642,9 @@ function mountEpisodes(movie, servers, state) {
       const stallTimer = setTimeout(() => {
         if (vid.isConnected && vid.readyState < 2) {
           markDead(item.m3u8);
-          hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`);
+          if (!hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(item.m3u8))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`)) {
+            showDead(item.m3u8, 'không còn nguồn thay thế', true);
+          }
         }
       }, 12000);
       vid.addEventListener('loadedmetadata', () => clearTimeout(stallTimer), { once: true });
@@ -1623,42 +1679,20 @@ function mountEpisodes(movie, servers, state) {
             const vEp = vsmovSv.eps[cur.ep];
             const vSrc = vEp.embed || vEp.m3u8 || vEp.link;
             if (vSrc) {
-              playerBox.innerHTML = `<iframe src="${esc(vSrc)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
-              mountPlayerCtl(null, vEp);
-              markAlive(vSrc);
-              notice('');
+              mountEmbed(vSrc, vEp);
               return;
             }
           }
           if (item.embed) {
-            playerBox.innerHTML = `<iframe src="${esc(item.embed)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
-            mountPlayerCtl(null, item);
-            markAlive(item.embed);
-            notice('');
+            mountEmbed(item.embed, item);
             return;
           }
           const wrap = 'https://player.phimapi.com/player/?url=' + encodeURIComponent(item.m3u8);
-          playerBox.innerHTML = `<iframe src="${esc(wrap)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
-          mountPlayerCtl(null, item);
-          notice('');
+          mountEmbed(wrap, item);
         });
       }, () => markAlive(item.m3u8));
     } else {
-      playerBox.innerHTML = `<iframe src="${esc(src)}" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>`;
-      const frame = playerBox.querySelector('iframe');
-      /* QA: an embed that never loads (blocked host / dead embed) must fall
-         back instead of showing a blank player. */
-      let frameLoaded = false;
-      frame?.addEventListener('load', () => { frameLoaded = true; }, { once: true });
-      setTimeout(() => {
-        if (!frameLoaded && frame?.isConnected) {
-          markDead(src);
-          hop(cur.sv, cur.ep, `Nguồn <b>${esc(hostOf(innerUrl(src)))}</b> không phản hồi — đã tự động chuyển sang server phát tốt hơn.`);
-        }
-      }, 12000);
-      mountPlayerCtl(null, item);
-      markAlive(src);
-      notice('');
+      mountEmbed(src, item);
     }
 
     if (serverBox) {
@@ -1710,7 +1744,7 @@ function mountEpisodes(movie, servers, state) {
     }
 
     const now = document.getElementById('epNow');
-    if (now) now.textContent = `${server.name} · ${item ? item.name : '—'}`;
+    if (now) now.textContent = `${server.name} · ${item ? item.name : '—'}${item && item.dur ? ' · ' + formatDur(item.dur) : ''}`;
 
     const prev = document.getElementById('prevEp');
     const next = document.getElementById('nextEp');
