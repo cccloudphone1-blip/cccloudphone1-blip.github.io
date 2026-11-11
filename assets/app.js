@@ -1246,8 +1246,6 @@ async function loadMovie(slug) {
     const scoreB = (isVsmovB ? 100 : 0) + (isPhimapiB ? 70 : 0) + (/vietsub/i.test(b.name) ? 15 : 0) + (/thuyết minh/i.test(b.audio + b.name) ? 5 : 0);
     return scoreB - scoreA || b.eps.length - a.eps.length;
   });
-    return scoreB - scoreA || b.eps.length - a.eps.length;
-  });
 
   const out = { movie, servers: list };
   mem.set(ck, out);
