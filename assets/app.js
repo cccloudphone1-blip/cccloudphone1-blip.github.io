@@ -1017,6 +1017,127 @@ async function fetchPhimapiMovie(slug) {
   }
 }
 
+async function fetchNguoncMovie(slug) {
+  try {
+    const res = await fetchWithTimeout(`https://phim.nguonc.com/api/film/${encodeURIComponent(slug)}`, {
+      headers: { accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json?.status !== 'success' || !json?.movie) return null;
+    const m = json.movie;
+    const movie = {
+      id: m.id || slug,
+      slug: m.slug || slug,
+      name: m.name || slug,
+      origin_name: m.original_name || '',
+      year: m.year || '',
+      type: (m.total_episodes > 1 || (m.current_episode && !/full/i.test(m.current_episode))) ? 'series' : 'single',
+      quality: m.quality || 'FHD',
+      lang: m.language || 'Vietsub',
+      episode_current: m.current_episode || '',
+      content: m.description || '',
+      poster_url: m.poster_url || m.thumb_url || '',
+      thumb_url: m.thumb_url || m.poster_url || '',
+      category: Array.isArray(m.category) ? m.category : [],
+      country: Array.isArray(m.country) ? m.country : [],
+      actor: m.casts ? m.casts.split(',').map(s => s.trim()) : [],
+      director: m.director ? [m.director] : [],
+      tmdb_vote_average: m.tmdb?.vote_average || 0,
+      _nguoncLive: true,
+    };
+    const servers = [];
+    if (Array.isArray(m.episodes)) {
+      for (const s of m.episodes) {
+        const rawName = (s.server_name || 'Vietsub').trim();
+        const serverName = `Nguồn C · ${rawName}`;
+        const eps = (s.items || []).map((e, idx) => {
+          const embed = e.embed || '';
+          const m3u8 = e.m3u8 || '';
+          const link = embed || m3u8;
+          const num = Number(String(e.name || idx + 1).replace(/\D+/g, '')) || (idx + 1);
+          return {
+            num,
+            name: e.name ? (String(e.name).toLowerCase().startsWith('tập') ? e.name : 'Tập ' + e.name) : 'Tập ' + num,
+            link, embed, m3u8,
+          };
+        }).filter(e => e.link);
+        if (eps.length) {
+          servers.push({
+            name: serverName,
+            audio: /thuyết minh/i.test(serverName) ? 'Thuyết minh' : 'Vietsub',
+            eps,
+          });
+        }
+      }
+    }
+    return { movie, servers };
+  } catch {
+    return null;
+  }
+}
+
+async function smartFindLiveMovie(slug, title) {
+  // 1. Thử PhimAPI bằng slug
+  let res = await fetchPhimapiMovie(slug);
+  if (res?.servers?.length) return res;
+
+  // 2. Thử slug số La Mã
+  const norm = normalizeRoman(slug);
+  if (norm && norm !== slug) {
+    res = await fetchPhimapiMovie(norm);
+    if (res?.servers?.length) return res;
+  }
+
+  // 3. Thử Nguồn C bằng slug
+  res = await fetchNguoncMovie(slug);
+  if (res?.servers?.length) return res;
+
+  if (norm && norm !== slug) {
+    res = await fetchNguoncMovie(norm);
+    if (res?.servers?.length) return res;
+  }
+
+  // 4. Tìm kiếm từ khóa trên PhimAPI
+  const kw = (title || slug.replace(/-/g, ' ')).replace(/[:\-]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (kw) {
+    try {
+      const pSearch = await fetch(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(kw)}&limit=5`);
+      if (pSearch.ok) {
+        const sJson = await pSearch.json();
+        const items = sJson?.data?.items || [];
+        for (const item of items) {
+          if (item?.slug) {
+            res = await fetchPhimapiMovie(item.slug);
+            if (res?.servers?.length) return res;
+          }
+        }
+      }
+    } catch {}
+
+    // 5. Tìm kiếm từ khóa trên Nguồn C
+    try {
+      const cSearch = await fetch(`https://phim.nguonc.com/api/films/search?keyword=${encodeURIComponent(kw)}`);
+      if (cSearch.ok) {
+        const cJson = await cSearch.json();
+        const items = cJson?.items || [];
+        for (const item of items) {
+          if (item?.slug) {
+            res = await fetchNguoncMovie(item.slug);
+            if (res?.servers?.length) return res;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 6. Thử VSMOV fallback cuối
+  res = await fetchVsmovMovie(slug);
+  if (res?.servers?.length) return res;
+
+  return null;
+}
+
 function normalizeRoman(slug) {
   if (!slug) return '';
   return slug
@@ -1135,33 +1256,53 @@ async function fetchLiveStreams(slug, movieTitle, originName) {
   /* Ưu tiên 3: Nguồn C Live */
   const pNguonC = (async () => {
     try {
+      let dataC = null;
       const resC = await fetchWithTimeout(`https://phim.nguonc.com/api/film/${encodeURIComponent(slug)}`, {
         headers: { accept: 'application/json' },
       });
       if (resC.ok) {
         const jsonC = await resC.json();
-        if (jsonC?.status === 'success' && Array.isArray(jsonC?.movie?.episodes)) {
-          for (const s of jsonC.movie.episodes) {
-            const rawName = (s.server_name || 'Vietsub').trim();
-            const serverName = `Nguồn C · ${rawName}`;
-            const eps = (s.items || []).map((e, idx) => {
-              const embed = e.embed || '';
-              const m3u8 = e.m3u8 || '';
-              const link = embed || m3u8;
-              const num = Number(e.name || idx + 1) || (idx + 1);
-              return {
-                num,
-                name: e.name ? (String(e.name).toLowerCase().startsWith('tập') ? e.name : 'Tập ' + e.name) : 'Tập ' + num,
-                link, embed, m3u8,
-              };
-            }).filter(e => e.link);
-            if (eps.length) {
-              liveServers.push({
-                name: serverName,
-                audio: /thuyết minh/i.test(serverName) ? 'Thuyết minh' : 'Vietsub',
-                eps,
-              });
+        if (jsonC?.status === 'success' && Array.isArray(jsonC?.movie?.episodes)) dataC = jsonC;
+      }
+      if (!dataC && cleanTitle) {
+        const sRes = await fetchWithTimeout(`https://phim.nguonc.com/api/films/search?keyword=${encodeURIComponent(cleanTitle)}`, {
+          headers: { accept: 'application/json' },
+        });
+        if (sRes.ok) {
+          const sJson = await sRes.json();
+          const items = sJson?.items || [];
+          if (items.length && items[0].slug) {
+            const dRes = await fetchWithTimeout(`https://phim.nguonc.com/api/film/${encodeURIComponent(items[0].slug)}`, {
+              headers: { accept: 'application/json' },
+            });
+            if (dRes.ok) {
+              const dJson = await dRes.json();
+              if (dJson?.status === 'success' && Array.isArray(dJson?.movie?.episodes)) dataC = dJson;
             }
+          }
+        }
+      }
+      if (dataC?.movie?.episodes) {
+        for (const s of dataC.movie.episodes) {
+          const rawName = (s.server_name || 'Vietsub').trim();
+          const serverName = `Nguồn C · ${rawName}`;
+          const eps = (s.items || []).map((e, idx) => {
+            const embed = e.embed || '';
+            const m3u8 = e.m3u8 || '';
+            const link = embed || m3u8;
+            const num = Number(String(e.name || idx + 1).replace(/\D+/g, '')) || (idx + 1);
+            return {
+              num,
+              name: e.name ? (String(e.name).toLowerCase().startsWith('tập') ? e.name : 'Tập ' + e.name) : 'Tập ' + num,
+              link, embed, m3u8,
+            };
+          }).filter(e => e.link);
+          if (eps.length) {
+            liveServers.push({
+              name: serverName,
+              audio: /thuyết minh/i.test(serverName) ? 'Thuyết minh' : 'Vietsub',
+              eps,
+            });
           }
         }
       }
@@ -1193,18 +1334,11 @@ async function loadMovie(slug) {
     const l = localHit();
     if (l) return l;
 
-    /* CỨU CÁNH VSMOV TRỰC TIẾP: Nếu Supabase không có phim, thử ngay API của VSMOV */
-    const vsmovData = await fetchVsmovMovie(slug);
-    if (vsmovData && vsmovData.servers.length) {
-      mem.set(ck, vsmovData);
-      return vsmovData;
-    }
-
-    /* Nếu VSMOV không có, thử tiếp PhimAPI */
-    const phimapiData = await fetchPhimapiMovie(slug);
-    if (phimapiData && phimapiData.servers.length) {
-      mem.set(ck, phimapiData);
-      return phimapiData;
+    /* Tự động tìm phim từ kho 30.563 phim PhimAPI + Nguồn C */
+    const liveMovie = await smartFindLiveMovie(slug);
+    if (liveMovie && liveMovie.servers && liveMovie.servers.length) {
+      mem.set(ck, liveMovie);
+      return liveMovie;
     }
 
     throw new Error('not found');
@@ -1282,6 +1416,22 @@ async function loadMovie(slug) {
       }
     }
   } catch {}
+
+  /* Nếu danh sách server vẫn rỗng hoặc toàn link chết, kích hoạt Smart Find Live Movie */
+  if (!list.length || !list.some(s => s.eps && s.eps.some(e => !isDead(e.embed || e.m3u8 || e.link)))) {
+    try {
+      const fallbackMovie = await smartFindLiveMovie(slug, movie?.name || movie?.origin_name);
+      if (fallbackMovie?.servers?.length) {
+        const known = new Set(list.map(s => s.name.toLowerCase()));
+        for (const fs of fallbackMovie.servers) {
+          if (!known.has(fs.name.toLowerCase())) {
+            list.push(fs);
+            known.add(fs.name.toLowerCase());
+          }
+        }
+      }
+    } catch {}
+  }
 
   list.sort((a, b) => {
     const aDead = (a.eps[0] && isDead(a.eps[0].embed || a.eps[0].m3u8 || a.eps[0].link)) ? 1 : 0;
@@ -2067,10 +2217,10 @@ async function renderSearch(params) {
   const box = document.getElementById('sres');
   box.innerHTML = loading('Đang tìm...');
   try {
-    const [res, vsmovRes, phimapiRes] = await Promise.allSettled([
+    const [res, nguoncRes, phimapiRes] = await Promise.allSettled([
       api('movies', { ...BASE, select: CARD_FIELDS, ...buildParams(eq) }, { page, paged: true }),
-      q ? fetch(`https://vsmov.com/api/tim-kiem?keyword=${encodeURIComponent(q)}`).then(r => r.json()) : Promise.resolve(null),
-      q ? fetch(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(q)}&limit=16`).then(r => r.json()) : Promise.resolve(null),
+      q ? fetchWithTimeout(`https://phim.nguonc.com/api/films/search?keyword=${encodeURIComponent(q)}`).then(r => r.json()) : Promise.resolve(null),
+      q ? fetchWithTimeout(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(q)}&limit=24`).then(r => r.json()) : Promise.resolve(null),
     ]);
 
     const supabaseRes = res.status === 'fulfilled' ? res.value : { rows: [], total: 0, totalPages: 1 };
@@ -2080,21 +2230,21 @@ async function renderSearch(params) {
       .filter(m => !low || [m.name, m.origin_name].filter(Boolean).some(x => String(x).toLowerCase().includes(low)))
       .map(m => ({ ...m, _local: true }));
 
-    let vsmovHits = [];
-    if (vsmovRes.status === 'fulfilled' && vsmovRes.value) {
-      const vItems = (vsmovRes.value.data && vsmovRes.value.data.items) || vsmovRes.value.items || [];
-      if (Array.isArray(vItems)) {
-        vsmovHits = vItems.map(m => ({
+    let nguoncHits = [];
+    if (nguoncRes.status === 'fulfilled' && nguoncRes.value?.items) {
+      const cItems = nguoncRes.value.items;
+      if (Array.isArray(cItems)) {
+        nguoncHits = cItems.map(m => ({
           name: m.name || '',
-          origin_name: m.origin_name || '',
+          origin_name: m.original_name || '',
           slug: m.slug,
           year: m.year || '',
           thumb_url: m.thumb_url || m.poster_url || '',
           poster_url: m.poster_url || m.thumb_url || '',
-          quality: 'FHD',
-          lang: 'Vietsub VSMOV',
-          episode_current: m.episode_current || 'Tập mới',
-          _liveSource: 'vsmov'
+          quality: m.quality || 'FHD',
+          lang: m.language || 'Vietsub',
+          episode_current: m.current_episode || '',
+          _liveSource: 'nguonc'
         }));
       }
     }
@@ -2120,7 +2270,7 @@ async function renderSearch(params) {
 
     const seen = new Set();
     const allRows = [];
-    for (const m of [...localHits, ...supabaseRes.rows, ...vsmovHits, ...phimapiHits]) {
+    for (const m of [...localHits, ...supabaseRes.rows, ...phimapiHits, ...nguoncHits]) {
       if (m && m.slug && !seen.has(m.slug)) {
         seen.add(m.slug);
         allRows.push(m);
@@ -2731,26 +2881,31 @@ function bindHeader() {
       try {
         const t = term(q);
         const qAtFetch = q;
-        const { rows } = await api('movies', {
-          ...BASE, select: 'slug,name,origin_name,year,poster_url,thumb_url',
-          or: `(name.ilike.*${t}*,origin_name.ilike.*${t}*)`, order: 'year.asc.nullslast', limit: 100,
-        });
+        const [sbRes, pRes] = await Promise.allSettled([
+          api('movies', {
+            ...BASE, select: 'slug,name,origin_name,year,poster_url,thumb_url',
+            or: `(name.ilike.*${t}*,origin_name.ilike.*${t}*)`, order: 'year.asc.nullslast', limit: 50,
+          }),
+          fetchWithTimeout(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(q)}&limit=10`).then(r => r.json()).catch(() => null)
+        ]);
         /* Ignore a stale response if the user kept typing. */
         if (input.value.trim() !== qAtFetch) return;
-        /* QA 2026-11-11 (PR #7): the suggestion dropdown used its own query
-           path (NEWEST order, limit 6, no dedupe), so after PR #6 fixed the
-           results page it still showed parts out of order with duplicates
-           (e.g. "Hoàng Tử Lai" 2009 twice, then Part 1, then Part 5). Reuse
-           the same series/part ordering + dedupe as the results page, then
-           show the first 10. Year-ascending server order makes sure the
-           earliest parts are inside the fetched window for big franchises.
-           QA 2026-11-11 (PR #8): limit was 20 and dedupe/sort happened AFTER
-           the fetch in JS — duplicate rows of Parts 1–6 from different
-           sources filled the 20-row window, so Parts 7.1 (2010) and 7.2
-           (2011) never reached the client and the dropdown stopped at
-           Part 6. Raised to 100 small card rows so dedupe has the whole
-           franchise to work with before slicing. */
-        const list = sortSearchResults(rows).slice(0, 10);
+
+        const sbRows = sbRes.status === 'fulfilled' ? sbRes.value.rows || [] : [];
+        let pRows = [];
+        if (pRes.status === 'fulfilled' && pRes.value?.data?.items) {
+          pRows = pRes.value.data.items.map(m => ({
+            name: m.name || '',
+            origin_name: m.origin_name || '',
+            slug: m.slug,
+            year: m.year || '',
+            thumb_url: m.thumb_url ? (m.thumb_url.startsWith('http') ? m.thumb_url : `https://phimimg.com/${m.thumb_url}`) : '',
+            poster_url: m.poster_url ? (m.poster_url.startsWith('http') ? m.poster_url : `https://phimimg.com/${m.poster_url}`) : '',
+          }));
+        }
+
+        const combined = [...sbRows, ...pRows];
+        const list = sortSearchResults(combined).slice(0, 10);
         if (!list.length) { sug.hidden = true; return; }
         sug.innerHTML = list.map(m => `<a href="/phim/${esc(m.slug)}">
           <img src="${esc(posterUrl(m))}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/brand/poster-placeholder.svg'">
