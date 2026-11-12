@@ -33,6 +33,12 @@ window.switchEpisode = function(url, btn) {
   }
 };
 
+// Proxy nén ảnh siêu nhẹ (WebP ~25KB) để load poster tức thì
+function fastPoster(url) {
+  if (!url || url.startsWith('/')) return '/brand/poster-placeholder.svg';
+  return 'https://wsrv.nl/?url=' + encodeURIComponent(url) + '&w=300&q=75&output=webp';
+}
+
 let allMovies = null;
 let currentPage = 1;
 const PAGE_SIZE = 36;
@@ -47,7 +53,6 @@ async function getCatalog() {
     const res = await fetch('/data/search_index.json');
     if (res.ok) {
       allMovies = await res.json();
-      // Sắp xếp mới nhất lên đầu
       allMovies.sort((a, b) => (b.y || 0) - (a.y || 0));
       return allMovies;
     }
@@ -56,9 +61,136 @@ async function getCatalog() {
 }
 
 async function initApp() {
+  initLiquidHeader();
   handleRoute();
   window.addEventListener('popstate', handleRoute);
   setupEvents();
+}
+
+// Khôi phục hiệu ứng kéo/bấm giọt nước iOS27 & nút 3 chấm Morph Island
+function initLiquidHeader() {
+  const tabBar = document.getElementById('ios27TabBar');
+  const droplet = document.getElementById('tabWaterDroplet');
+  const tabs = tabBar ? Array.from(tabBar.querySelectorAll('.tab-btn')) : [];
+
+  function moveDropletToTab(tab, instant = false) {
+    if (!tabBar || !droplet || !tab) return;
+    tabs.forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const left = tab.offsetLeft;
+    const width = tab.offsetWidth;
+    if (instant) droplet.style.transition = 'none';
+    droplet.style.width = width + 'px';
+    droplet.style.transform = 'translateX(' + left + 'px)';
+    if (instant) {
+      void droplet.offsetWidth;
+      droplet.style.transition = '';
+    }
+  }
+
+  window.syncTabDropletByPath = function(path) {
+    if (!tabs.length) return;
+    let target = tabs[0];
+    if (path.startsWith('/danh-sach/phim-bo') || path.startsWith('/phim-bo')) target = tabs.find(t => t.dataset.cat === 'series') || target;
+    else if (path.startsWith('/danh-sach/phim-le') || path.startsWith('/phim-le')) target = tabs.find(t => t.dataset.cat === 'single') || target;
+    else if (path.startsWith('/danh-sach/phim-chieu-rap') || path.startsWith('/chieu-rap')) target = tabs.find(t => t.dataset.cat === 'cinema') || target;
+    else if (path.startsWith('/danh-sach/hoat-hinh') || path.startsWith('/anime')) target = tabs.find(t => t.dataset.cat === 'anime') || target;
+    else if (path.startsWith('/blog')) target = tabs.find(t => t.dataset.cat === 'blog') || target;
+    moveDropletToTab(target);
+  };
+
+  if (tabBar && droplet && tabs.length) {
+    let isDragging = false;
+    let dragStartX = 0;
+    let hasMoved = false;
+
+    const getTabAtX = (clientX) => {
+      const rect = tabBar.getBoundingClientRect();
+      const x = clientX - rect.left;
+      let closest = tabs[0];
+      let minDist = Infinity;
+      for (const t of tabs) {
+        const center = t.offsetLeft + t.offsetWidth / 2;
+        const d = Math.abs(x - center);
+        if (d < minDist) {
+          minDist = d;
+          closest = t;
+        }
+      }
+      return closest;
+    };
+
+    const onPointerDown = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      isDragging = true;
+      hasMoved = false;
+      dragStartX = e.clientX;
+      tabBar.classList.add('dragging');
+    };
+
+    const onPointerMove = (e) => {
+      if (!isDragging) return;
+      if (Math.abs(e.clientX - dragStartX) > 4) hasMoved = true;
+      const rect = tabBar.getBoundingClientRect();
+      const hoveredTab = getTabAtX(e.clientX);
+      const maxLeft = tabBar.clientWidth - hoveredTab.offsetWidth - 6;
+      const rawLeft = e.clientX - rect.left - hoveredTab.offsetWidth / 2;
+      const clampedLeft = Math.max(6, Math.min(maxLeft, rawLeft));
+
+      droplet.style.transition = 'width 0.15s ease';
+      droplet.style.width = hoveredTab.offsetWidth + 'px';
+      droplet.style.transform = 'translateX(' + clampedLeft + 'px) scale(1.06, 0.94)';
+
+      tabs.forEach(t => t.classList.toggle('active', t === hoveredTab));
+    };
+
+    const onPointerUp = (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      tabBar.classList.remove('dragging');
+      droplet.style.transition = '';
+
+      const targetTab = getTabAtX(e.clientX);
+      moveDropletToTab(targetTab);
+      if (hasMoved && targetTab) {
+        const href = targetTab.getAttribute('href');
+        if (href) navigate(href);
+      }
+    };
+
+    tabBar.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('resize', () => {
+      const active = tabBar.querySelector('.tab-btn.active') || tabs[0];
+      moveDropletToTab(active, true);
+    });
+
+    // Khởi tạo vị trí ban đầu
+    setTimeout(() => window.syncTabDropletByPath(window.location.pathname), 60);
+  }
+
+  // Nút 3 chấm Morph Island
+  const morphIsland = document.getElementById('originMorphIsland');
+  const morphTrigger = document.getElementById('morphDotsTrigger');
+  const morphClose = document.getElementById('morphCloseBtn');
+  if (morphIsland && morphTrigger) {
+    morphTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      morphIsland.classList.toggle('expanded');
+    });
+    if (morphClose) {
+      morphClose.addEventListener('click', (e) => {
+        e.stopPropagation();
+        morphIsland.classList.remove('expanded');
+      });
+    }
+    document.addEventListener('click', (e) => {
+      if (!morphIsland.contains(e.target)) {
+        morphIsland.classList.remove('expanded');
+      }
+    });
+  }
 }
 
 function handleRoute() {
@@ -67,21 +199,23 @@ function handleRoute() {
   currentPage = parseInt(params.get('page') || '1', 10) || 1;
   currentFilterYear = params.get('year') || 'all';
 
+  if (window.syncTabDropletByPath) window.syncTabDropletByPath(path);
+
   if (path.startsWith('/xem-phim/') || path.startsWith('/phim/')) {
     const slug = path.replace(/^\/(xem-phim|phim)\//, '').replace(/\/$/, '');
     renderWatchPage(slug);
   } else if (path.startsWith('/tim-kiem')) {
     renderSearchResults(params.get('q') || '');
-  } else if (path.startsWith('/phim-bo')) {
+  } else if (path.startsWith('/danh-sach/phim-bo') || path.startsWith('/phim-bo')) {
     currentFilterType = 'tv';
     renderCatalogPage('📺 Phim Bộ Chọn Lọc');
-  } else if (path.startsWith('/phim-le')) {
+  } else if (path.startsWith('/danh-sach/phim-le') || path.startsWith('/phim-le')) {
     currentFilterType = 'movie';
     renderCatalogPage('🎬 Phim Lẻ Chọn Lọc');
-  } else if (path.startsWith('/anime')) {
+  } else if (path.startsWith('/danh-sach/hoat-hinh') || path.startsWith('/anime')) {
     currentFilterType = 'anime';
     renderCatalogPage('🌸 Anime & Hoạt Hình');
-  } else if (path.startsWith('/chieu-rap')) {
+  } else if (path.startsWith('/danh-sach/phim-chieu-rap') || path.startsWith('/chieu-rap')) {
     currentFilterType = 'theater';
     renderCatalogPage('🍿 Phim Chiếu Rạp Mới');
   } else {
@@ -91,8 +225,15 @@ function handleRoute() {
 }
 
 function setupEvents() {
-  const searchInput = document.querySelector('input[type="search"], .search-input, input[name="q"], #search, #searchInput');
-  if (searchInput) {
+  const searchForm = document.getElementById('searchForm');
+  const searchInput = document.getElementById('searchInput') || document.querySelector('input[type="search"], .search-input, input[name="q"]');
+  if (searchForm && searchInput) {
+    searchForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const q = searchInput.value.trim();
+      if (q) navigate('/tim-kiem?q=' + encodeURIComponent(q));
+    });
+  } else if (searchInput) {
     searchInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -110,25 +251,18 @@ function setupEvents() {
         url.pathname.startsWith('/xem-phim/') ||
         url.pathname.startsWith('/phim/') ||
         url.pathname.startsWith('/tim-kiem') ||
+        url.pathname.startsWith('/danh-sach/') ||
         url.pathname.startsWith('/phim-') ||
         url.pathname.startsWith('/anime') ||
         url.pathname.startsWith('/chieu-rap') ||
         url.pathname === '/'
       ) {
         e.preventDefault();
+        const morph = document.getElementById('originMorphIsland');
+        if (morph) morph.classList.remove('expanded');
         navigate(url.pathname + url.search);
       }
     }
-  });
-
-  // Gắn event cho menu navigation trên header
-  document.querySelectorAll('nav a, header a, .nav-item, .category-tab, .pill').forEach(el => {
-    const text = el.textContent.trim().toLowerCase();
-    if (text === 'khám phá' || text === 'trang chủ') el.onclick = (e) => { e.preventDefault(); navigate('/'); };
-    else if (text === 'phim bộ') el.onclick = (e) => { e.preventDefault(); navigate('/phim-bo'); };
-    else if (text === 'phim lẻ') el.onclick = (e) => { e.preventDefault(); navigate('/phim-le'); };
-    else if (text.includes('chiếu rạp')) el.onclick = (e) => { e.preventDefault(); navigate('/chieu-rap'); };
-    else if (text.includes('anime')) el.onclick = (e) => { e.preventDefault(); navigate('/anime'); };
   });
 }
 
@@ -138,17 +272,15 @@ function navigate(url) {
   window.scrollTo(0, 0);
 }
 
-window.applyFilter = function(typeVal, yearVal) {
-  let base = '/';
-  if (typeVal === 'tv') base = '/phim-bo';
-  else if (typeVal === 'movie') base = '/phim-le';
-  else if (typeVal === 'anime') base = '/anime';
-  else if (typeVal === 'theater') base = '/chieu-rap';
-
-  const qs = new URLSearchParams();
-  if (yearVal && yearVal !== 'all') qs.set('year', yearVal);
-  const query = qs.toString();
-  navigate(base + (query ? '?' + query : ''));
+window.applyYearFilter = function(yearVal) {
+  const url = new URL(window.location.href);
+  if (yearVal && yearVal !== 'all') {
+    url.searchParams.set('year', yearVal);
+  } else {
+    url.searchParams.delete('year');
+  }
+  url.searchParams.delete('page');
+  navigate(url.pathname + url.search);
 };
 
 window.goToPage = function(page) {
@@ -248,7 +380,7 @@ async function renderSearchResults(q) {
   renderGrid(container, '🔍 Kết quả cho: "' + q + '" (' + hits.length + ' phim)', hits, false);
 }
 
-// 3. Trang Danh Mục + Phân Trang + Bộ Lọc
+// 3. Trang Danh Mục + Phân Trang + Bộ Lọc Năm (Không lặp nút loại phim với Header)
 async function renderCatalogPage(title) {
   const container = document.getElementById('app') || document.querySelector('main') || document.body;
   if (!container) return;
@@ -282,7 +414,7 @@ async function renderCatalogPage(title) {
   renderGrid(container, title, filtered, true);
 }
 
-function renderGrid(container, title, fullList, showFilters) {
+function renderGrid(container, title, fullList, showYearFilter) {
   document.title = title + ' - h0syh0aπg Cinema';
 
   const totalItems = fullList.length;
@@ -293,14 +425,9 @@ function renderGrid(container, title, fullList, showFilters) {
   const start = (currentPage - 1) * PAGE_SIZE;
   const pageItems = fullList.slice(start, start + PAGE_SIZE);
 
-  // Bộ lọc nhanh
-  let filterBar = '';
-  if (showFilters) {
-    const typeBtn = (val, label) => {
-      const active = currentFilterType === val;
-      return '<button onclick="applyFilter(\'' + val + '\', \'' + currentFilterYear + '\')" style="padding:8px 16px;border-radius:20px;border:1px solid ' + (active ? '#00f0ff' : 'rgba(255,255,255,0.12)') + ';background:' + (active ? '#00f0ff' : 'rgba(255,255,255,0.05)') + ';color:' + (active ? '#000' : '#fff') + ';font-weight:600;font-size:13px;cursor:pointer;transition:0.2s;">' + label + '</button>';
-    };
-
+  // Chỉ giữ duy nhất dropdown Năm gọn gàng (không trùng nút loại phim với Header)
+  let yearSelectHtml = '';
+  if (showYearFilter) {
     const years = [
       { v: 'all', l: 'Tất cả năm' },
       { v: '2026', l: '2026' },
@@ -312,21 +439,11 @@ function renderGrid(container, title, fullList, showFilters) {
       { v: '2020', l: '2020' },
       { v: '2019', l: 'Trước 2020' }
     ];
-
-    filterBar = '<div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:24px;padding:14px 18px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;">' +
-      '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
-        typeBtn('all', 'Tất cả (' + (allMovies ? allMovies.length : 7036) + ')') +
-        typeBtn('movie', 'Phim Lẻ') +
-        typeBtn('tv', 'Phim Bộ') +
-        typeBtn('theater', 'Chiếu Rạp Mới') +
-        typeBtn('anime', 'Anime') +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px;">' +
-        '<span style="color:#8b94a7;font-size:13px;">Năm:</span>' +
-        '<select onchange="applyFilter(\'' + currentFilterType + '\', this.value)" style="background:#131722;color:#fff;border:1px solid rgba(255,255,255,0.15);padding:7px 12px;border-radius:8px;font-size:13px;outline:none;cursor:pointer;">' +
-          years.map(y => '<option value="' + y.v + '"' + (currentFilterYear === y.v ? ' selected' : '') + '>' + y.l + '</option>').join('') +
-        '</select>' +
-      '</div>' +
+    yearSelectHtml = '<div style="display:flex;align-items:center;gap:8px;">' +
+      '<span style="color:#8b94a7;font-size:13px;">Năm:</span>' +
+      '<select onchange="applyYearFilter(this.value)" style="background:#131722;color:#fff;border:1px solid rgba(255,255,255,0.15);padding:6px 12px;border-radius:8px;font-size:13px;outline:none;cursor:pointer;">' +
+        years.map(y => '<option value="' + y.v + '"' + (currentFilterYear === y.v ? ' selected' : '') + '>' + y.l + '</option>').join('') +
+      '</select>' +
     '</div>';
   }
 
@@ -361,22 +478,25 @@ function renderGrid(container, title, fullList, showFilters) {
   }
 
   container.innerHTML = '<div style="max-width:1200px;margin:20px auto;padding:0 15px;font-family:sans-serif;">' +
-    '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;">' +
-      '<h2 style="color:#fff;font-size:22px;margin:0;">' + title + '</h2>' +
-      '<span style="color:#8b94a7;font-size:13px;">Trang ' + currentPage + ' / ' + totalPages + ' (' + totalItems + ' phim)</span>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:22px;">' +
+      '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">' +
+        '<h2 style="color:#fff;font-size:22px;margin:0;">' + title + '</h2>' +
+        '<span style="color:#8b94a7;font-size:13px;">Trang ' + currentPage + ' / ' + totalPages + ' (' + totalItems + ' phim)</span>' +
+      '</div>' +
+      yearSelectHtml +
     '</div>' +
-    filterBar +
     (pageItems.length ? (
       '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:20px;">' +
         pageItems.map(m => {
           const slug = m.slug || m.s;
           const name = m.name || m.n;
-          const thumb = m.thumb_url || m.poster_url || m.p || '/brand/poster-placeholder.svg';
+          const rawThumb = m.thumb_url || m.poster_url || m.p || '';
+          const thumb = fastPoster(rawThumb);
           const year = m.year || m.y || 'FHD';
           const typeBadge = (m.t === 'tv' || m.t === 'series') ? 'Phim Bộ' : 'Phim Lẻ';
           return '<a href="/xem-phim/' + slug + '" style="text-decoration:none;background:#131722;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 4px 15px rgba(0,0,0,0.5);transition:transform 0.2s;" onmouseover="this.style.transform=\'scale(1.03)\'" onmouseout="this.style.transform=\'none\'">' +
             '<div style="position:relative;width:100%;padding-top:140%;background:#0b0e14;">' +
-              '<img src="' + thumb + '" alt="' + name + '" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.src=\'/brand/poster-placeholder.svg\'">' +
+              '<img src="' + thumb + '" alt="' + name + '" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;" loading="lazy" decoding="async" onerror="this.onerror=null;this.src=\'' + rawThumb + '\'">' +
               '<span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.75);color:#00f0ff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:4px;border:1px solid rgba(0,240,255,0.3);">' + typeBadge + '</span>' +
             '</div>' +
             '<div style="padding:10px;">' +
