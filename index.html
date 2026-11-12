@@ -3646,6 +3646,77 @@ async function fetchLiveStreams(slug, movieTitle, originName) {
   return liveServers;
 }
 
+
+async function fetchCatalogMovie(slug) {
+  try {
+    const h = Array.from(slug).reduce((acc, c) => acc + c.charCodeAt(0), 0) % 100;
+    const res = await fetch('/data/b/' + h + '.json');
+    if (!res.ok) return null;
+    const bucket = await res.json();
+    const m = bucket[slug];
+    if (!m) return null;
+    
+    const movie = {
+      id: m.slug,
+      slug: m.slug,
+      name: m.name,
+      origin_name: m.origin_name || '',
+      thumb_url: m.thumb_url || m.poster_url || '',
+      poster_url: m.poster_url || m.thumb_url || '',
+      year: m.year || '',
+      quality: 'FHD',
+      lang: 'Vietsub + Thuyết minh',
+      type: m.type === 'tv' ? 'series' : 'single',
+      episode_current: m.type === 'tv' ? 'Đang cập nhật' : 'Full',
+      content: m.content || ('Xem phim ' + m.name + ' (' + m.origin_name + ') chất lượng cao Full HD Vietsub Thuyết minh.'),
+      tmdb_vote_average: 9.0,
+      _catalogLive: true
+    };
+    
+    const servers = [];
+    if (m.vip_rescue) {
+      if (m.vip_rescue.autoembed) {
+        servers.push({
+          name: 'VIP Quốc Tế · AutoEmbed',
+          audio: 'Vietsub Quốc Tế',
+          eps: [{ num: 1, name: 'Tập Full', link: m.vip_rescue.autoembed, embed: m.vip_rescue.autoembed, m3u8: '' }]
+        });
+      }
+      if (m.vip_rescue.twoembed) {
+        servers.push({
+          name: 'VIP Quốc Tế · 2Embed',
+          audio: 'Vietsub Quốc Tế',
+          eps: [{ num: 1, name: 'Tập Full', link: m.vip_rescue.twoembed, embed: m.vip_rescue.twoembed, m3u8: '' }]
+        });
+      }
+    }
+    
+    if (Array.isArray(m.episodes)) {
+      for (const s of m.episodes) {
+        const sName = (s.server_name || 'Vietsub').trim();
+        const eps = (s.server_data || []).map((e, idx) => ({
+          num: Number(String(e.slug || idx + 1).replace(/\D+/g, '')) || (idx + 1),
+          name: e.name || ('Tập ' + (idx + 1)),
+          link: e.link_m3u8 || e.link_embed || '',
+          m3u8: e.link_m3u8 || '',
+          embed: e.link_embed || ''
+        })).filter(e => e.link);
+        if (eps.length) {
+          servers.push({
+            name: (m.provider || 'Nguồn') + ' · ' + sName,
+            audio: /lồng tiếng|thuyết minh/i.test(sName) ? 'Thuyết minh' : 'Vietsub',
+            eps: eps
+          });
+        }
+      }
+    }
+    
+    return { movie: movie, servers: servers };
+  } catch (err) {
+    return null;
+  }
+}
+
 async function loadMovie(slug) {
   const ck = 'mv:' + slug;
   if (mem.has(ck)) return mem.get(ck);
