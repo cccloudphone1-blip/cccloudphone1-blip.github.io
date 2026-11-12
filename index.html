@@ -1,37 +1,3 @@
-
-let _catalogSearchIndex = null;
-async function searchCatalog(q) {
-  if (!_catalogSearchIndex) {
-    try {
-      const res = await fetch('/data/search_index.json');
-      if (res.ok) _catalogSearchIndex = await res.json();
-    } catch {}
-  }
-  if (!_catalogSearchIndex || !q) return [];
-  const kw = q.toLowerCase().trim();
-  const hits = [];
-  for (const m of _catalogSearchIndex) {
-    if (m.n?.toLowerCase().includes(kw) || m.o?.toLowerCase().includes(kw) || m.s?.includes(kw)) {
-      hits.push({
-        slug: m.s,
-        name: m.n,
-        origin_name: m.o,
-        year: m.y,
-        type: m.t === 'tv' ? 'series' : 'single',
-        thumb_url: m.p,
-        poster_url: m.p,
-        quality: 'FHD',
-        lang: 'Vietsub + TM',
-        episode_current: m.t === 'tv' ? 'Series' : 'Full',
-        tmdb_vote_average: 9.0,
-        _catalog: true
-      });
-      if (hits.length >= 48) break;
-    }
-  }
-  return hits;
-}
-
 <!doctype html>
 <html lang="vi">
 <head>
@@ -3680,89 +3646,7 @@ async function fetchLiveStreams(slug, movieTitle, originName) {
   return liveServers;
 }
 
-
-async function fetchCatalogMovie(slug) {
-  try {
-    const h = Array.from(slug).reduce((acc, c) => acc + c.charCodeAt(0), 0) % 100;
-    const res = await fetch(/data/b/.json);
-    if (!res.ok) return null;
-    const bucket = await res.json();
-    const m = bucket[slug];
-    if (!m) return null;
-    
-    // Chuẩn hóa sang movie object
-    const movie = {
-      id: m.slug,
-      slug: m.slug,
-      name: m.name,
-      origin_name: m.origin_name || '',
-      thumb_url: m.thumb_url || m.poster_url || '',
-      poster_url: m.poster_url || m.thumb_url || '',
-      year: m.year || '',
-      quality: 'FHD',
-      lang: 'Vietsub + Thuyết minh',
-      type: m.type === 'tv' ? 'series' : 'single',
-      episode_current: m.type === 'tv' ? 'Đang cập nhật' : 'Full',
-      content: m.content || Xem phim  () chất lượng cao Full HD Vietsub Thuyết minh.,
-      tmdb_vote_average: 9.0,
-      _catalogLive: true
-    };
-    
-    const servers = [];
-    // 1. Luồng VIP Rescue
-    if (m.vip_rescue) {
-      if (m.vip_rescue.autoembed) {
-        servers.push({
-          name: 'VIP Quốc Tế · AutoEmbed',
-          audio: 'Vietsub Quốc Tế',
-          eps: [{ num: 1, name: 'Tập Full', link: m.vip_rescue.autoembed, embed: m.vip_rescue.autoembed, m3u8: '' }]
-        });
-      }
-      if (m.vip_rescue.twoembed) {
-        servers.push({
-          name: 'VIP Quốc Tế · 2Embed',
-          audio: 'Vietsub Quốc Tế',
-          eps: [{ num: 1, name: 'Tập Full', link: m.vip_rescue.twoembed, embed: m.vip_rescue.twoembed, m3u8: '' }]
-        });
-      }
-    }
-    
-    // 2. Luồng VSMOV / Nguồn C có sẵn trong catalog
-    if (Array.isArray(m.episodes)) {
-      for (const s of m.episodes) {
-        const sName = (s.server_name || 'Vietsub').trim();
-        const eps = (s.server_data || []).map((e, idx) => ({
-          num: Number(e.slug?.replace(/\D+/g, '') || idx + 1) || (idx + 1),
-          name: e.name || Tập ,
-          link: e.link_m3u8 || e.link_embed || '',
-          m3u8: e.link_m3u8 || '',
-          embed: e.link_embed || ''
-        })).filter(e => e.link);
-        if (eps.length) {
-          servers.push({
-            name: ${m.provider || 'Nguồn'} · ,
-            audio: /lồng tiếng|thuyết minh/i.test(sName) ? 'Thuyết minh' : 'Vietsub',
-            eps
-          });
-        }
-      }
-    }
-    
-    return { movie, servers };
-  } catch (err) {
-    console.warn('fetchCatalogMovie failed', err);
-    return null;
-  }
-}
-
 async function loadMovie(slug) {
-  // 1. ƯU TIÊN TUYỆT ĐỐI NẠP TỪ KHO 44,843 PHIM MỚI NHẤT
-  const catalogHit = await fetchCatalogMovie(slug);
-  if (catalogHit && catalogHit.servers && catalogHit.servers.length) {
-    mem.set(ck, catalogHit);
-    return catalogHit;
-  }
-
   const ck = 'mv:' + slug;
   if (mem.has(ck)) return mem.get(ck);
   const localOnly = localMovies().some(m => m.slug === slug);
@@ -4720,8 +4604,7 @@ async function renderSearch(params) {
 
     const seen = new Set();
     const allRows = [];
-    const catalogHits = await searchCatalog(q);
-    for (const m of [...catalogHits, ...localHits, ...supabaseRes.rows, ...phimapiHits, ...nguoncHits]) {
+    for (const m of [...localHits, ...supabaseRes.rows, ...phimapiHits, ...nguoncHits]) {
       if (m && m.slug && !seen.has(m.slug)) {
         seen.add(m.slug);
         allRows.push(m);
