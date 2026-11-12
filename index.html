@@ -3649,6 +3649,15 @@ async function fetchLiveStreams(slug, movieTitle, originName) {
 async function loadMovie(slug) {
   const ck = 'mv:' + slug;
   if (mem.has(ck)) return mem.get(ck);
+  // 1. ƯU TIÊN SỐ 1: NẠP TỪ KHO 44,843 PHIM SẠCH ĐÃ TEST VIP
+  try {
+    const catalogHit = await fetchCatalogMovie(slug);
+    if (catalogHit && catalogHit.servers && catalogHit.servers.length) {
+      mem.set(ck, catalogHit);
+      return catalogHit;
+    }
+  } catch (err) {}
+  if (mem.has(ck)) return mem.get(ck);
   const localOnly = localMovies().some(m => m.slug === slug);
   if (localOnly) {
     const l = findLocalMovie(slug);
