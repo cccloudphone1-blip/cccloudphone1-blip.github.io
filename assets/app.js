@@ -315,10 +315,15 @@ async function renderWatchPage(slug) {
 
   document.title = 'Xem ' + movie.name + ' - h0syh0aπg Cinema';
 
-  const servers = movie.episodes;
-  const firstServer = servers[0];
-  const firstEp = firstServer.server_data[0];
+  const servers = movie.episodes || [];
+  const firstServer = servers[0] || { server_data: [] };
+  const firstEp = firstServer.server_data[0] || {};
   const streamUrl = firstEp.link_embed || firstEp.link_m3u8 || '';
+
+  // Nguồn dự phòng Quốc tế qua TMDB ID (nếu có)
+  const tmdbId = movie.tmdb_id || (movie.tmdb && movie.tmdb.id);
+  const isSeries = movie.type === 'series' || movie.type === 'tv';
+  const intlEmbed = tmdbId ? (isSeries ? ('https://vidsrc.me/embed/tv?tmdb=' + tmdbId + '&season=1&episode=1') : ('https://vidsrc.me/embed/movie?tmdb=' + tmdbId)) : null;
 
   let serverBtns = '';
   for (let idx = 0; idx < servers.length; idx++) {
@@ -327,6 +332,10 @@ async function renderWatchPage(slug) {
     const bg = idx === 0 ? '#00f0ff' : 'rgba(255,255,255,0.08)';
     const col = idx === 0 ? '#000' : '#fff';
     serverBtns += '<button type="button" style="padding:10px 18px;background:' + bg + ';color:' + col + ';border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:0.2s;" onclick="switchServer(\'' + sUrl + '\', this)">▶ ' + s.server_name.replace(/[\r\n\t]+/g, ' ').trim() + '</button> ';
+  }
+
+  if (intlEmbed) {
+    serverBtns += '<button type="button" style="padding:10px 18px;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:0.2s;" onclick="switchServer(\'' + intlEmbed + '\', this)">🌐 Nguồn Quốc Tế (TMDB)</button> ';
   }
 
   let epHtml = '';
