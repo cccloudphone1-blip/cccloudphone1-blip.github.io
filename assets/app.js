@@ -65,54 +65,60 @@ function navigate(url) {
 
 // 1. Trang Xem Phim (Watch Page)
 async function renderWatchPage(slug) {
-  const app = $('main, #app, .main, .container') || document.body;
-  const playerBox = $('section.player, #playerBox, .player__box');
-  
-  if (playerBox) {
-    playerBox.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:500px;background:#000;color:#66fcf1;font-size:16px;">Đang chuẩn bị luồng phát sạch...</div>';
-  }
+  const app = document.getElementById('app') || document.querySelector('main') || document.body;
+  app.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#00f0ff;font-size:18px;font-family:sans-serif;">⚡ Đang kết nối máy chủ phát sạch...</div>';
 
-  // Lấy dữ liệu phim từ partitioned bucket
   const h = Array.from(slug).reduce((acc, c) => acc + c.charCodeAt(0), 0) % 100;
   let movie = null;
   try {
-    const res = await fetch(`/data/b/${h}.json`);
+    const res = await fetch('/data/b/' + h + '.json');
     if (res.ok) {
       const bucket = await res.json();
       movie = bucket[slug];
     }
   } catch (e) {}
 
-  if (!movie) {
-    if (playerBox) playerBox.innerHTML = '<div style="padding:40px;color:#ef4444;text-align:center;">Phim này đã bị xóa do toàn bộ nguồn phát đều lỗi.</div>';
+  if (!movie || !movie.episodes || !movie.episodes.length) {
+    app.innerHTML = '<div style="max-width:600px;margin:80px auto;text-align:center;color:#ef4444;font-family:sans-serif;"><h2>Phim này đã bị xóa do toàn bộ nguồn phát đều lỗi</h2><p style="color:#8b94a7;margin-top:10px;">Chúng tôi đã loại bỏ phim này để tránh lỗi vòng xoay vô tận.</p><a href="/" style="display:inline-block;margin-top:20px;padding:10px 20px;background:#00f0ff;color:#000;text-decoration:none;font-weight:700;border-radius:8px;">Về Trang Chủ</a></div>';
     return;
   }
 
-  document.title = `Xem ${movie.name} - h0syh0aπg Cinema`;
+  document.title = 'Xem ' + movie.name + ' - h0syh0aπg Cinema';
 
-  // Render iframe và danh sách server
-  const servers = movie.episodes || [];
-  const firstServer = servers[0] || {};
-  const firstEp = (firstServer.server_data && firstServer.server_data[0]) || {};
+  const servers = movie.episodes;
+  const firstServer = servers[0];
+  const firstEp = firstServer.server_data[0];
   const streamUrl = firstEp.link_embed || firstEp.link_m3u8 || '';
 
-  if (playerBox) {
-    playerBox.innerHTML = `
-      <div class="player__box" style="position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.8);">
-        <iframe src="${streamUrl}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>
-      </div>
-      <div class="server-list" style="display:flex;gap:10px;margin-top:15px;flex-wrap:wrap;">
-        ${servers.map((s, idx) => `
-          <button type="button" class="btn ${idx === 0 ? 'active' : ''}" style="padding:8px 16px;background:${idx === 0 ? '#00f0ff' : 'rgba(255,255,255,0.1)'};color:${idx === 0 ? '#000' : '#fff'};border:none;border-radius:8px;cursor:pointer;font-weight:600;" onclick="switchServer('${(s.server_data[0] && s.server_data[0].link_embed) || ''}', this)">
-            ${s.server_name}
-          </button>
-        `).join('')}
-      </div>
-    `;
+  let serverBtns = '';
+  for (let idx = 0; idx < servers.length; idx++) {
+    const s = servers[idx];
+    const sUrl = (s.server_data[0] && (s.server_data[0].link_embed || s.server_data[0].link_m3u8)) || '';
+    const bg = idx === 0 ? '#00f0ff' : 'rgba(255,255,255,0.08)';
+    const col = idx === 0 ? '#000' : '#fff';
+    serverBtns += '<button type="button" style="padding:10px 18px;background:' + bg + ';color:' + col + ';border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;" onclick="switchServer(\'' + sUrl + '\', this)">▶ ' + s.server_name + '</button> ';
   }
+
+  app.innerHTML = '<div style="max-width:1200px;margin:20px auto;padding:0 15px;font-family:sans-serif;">' +
+    '<div style="margin-bottom:15px;">' +
+      '<a href="/" style="color:#8b94a7;text-decoration:none;">Trang chủ</a> / <span style="color:#fff;">' + movie.name + '</span>' +
+      '<h1 style="color:#fff;font-size:24px;margin:10px 0 5px 0;">' + movie.name + ' <small style="color:#8b94a7;font-size:16px;">(' + (movie.year || '2001') + ')</small></h1>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<span style="background:#00f0ff;color:#000;font-weight:700;font-size:12px;padding:3px 8px;border-radius:4px;">FHD</span>' +
+        '<span style="background:rgba(255,255,255,0.1);color:#fff;font-size:12px;padding:3px 8px;border-radius:4px;">VIETSUB SẠCH 100%</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="player__box" style="position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:12px;overflow:hidden;box-shadow:0 15px 40px rgba(0,0,0,0.9);">' +
+      '<iframe src="' + streamUrl + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>' +
+    '</div>' +
+    '<div style="margin-top:20px;">' +
+      '<h3 style="color:#fff;font-size:16px;margin-bottom:10px;">Chọn Máy Chủ Phát:</h3>' +
+      '<div class="server-list" style="display:flex;gap:10px;flex-wrap:wrap;">' + serverBtns + '</div>' +
+    '</div>' +
+  '</div>';
 }
 
-window.switchServer = function(url, btn) {
+window.switchServerwindow.switchServer = function(url, btn) {
   const iframe = document.querySelector('.player__box iframe');
   if (iframe && url) {
     iframe.src = url;
