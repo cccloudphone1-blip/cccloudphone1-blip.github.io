@@ -320,10 +320,10 @@ async function renderWatchPage(slug) {
   const firstEp = firstServer.server_data[0] || {};
   const streamUrl = firstEp.link_embed || firstEp.link_m3u8 || '';
 
-  // Nguồn dự phòng Quốc tế qua TMDB ID (nếu có)
+  // Nguồn dự phòng Quốc tế qua TMDB ID (dùng Vidlink sạch không Captcha/Cloudflare)
   const tmdbId = movie.tmdb_id || (movie.tmdb && movie.tmdb.id);
   const isSeries = movie.type === 'series' || movie.type === 'tv';
-  const intlEmbed = tmdbId ? (isSeries ? ('https://vidsrc.me/embed/tv?tmdb=' + tmdbId + '&season=1&episode=1') : ('https://vidsrc.me/embed/movie?tmdb=' + tmdbId)) : null;
+  const intlEmbed = tmdbId ? (isSeries ? ('https://vidlink.pro/tv/' + tmdbId + '/1/1') : ('https://vidlink.pro/movie/' + tmdbId)) : null;
 
   let serverBtns = '';
   for (let idx = 0; idx < servers.length; idx++) {
