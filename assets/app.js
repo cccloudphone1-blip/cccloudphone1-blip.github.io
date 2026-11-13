@@ -3,33 +3,63 @@
  * Kết nối trực tiếp 7,036 phim sạch 100% không link chết
  */
 
-window.switchServer = function(url, btn) {
-  const iframe = document.querySelector('.player__box iframe');
-  if (iframe && url) {
-    iframe.src = url;
-    document.querySelectorAll('.server-list button').forEach(b => {
-      b.style.background = 'rgba(255,255,255,0.08)';
-      b.style.color = '#fff';
-    });
-    if (btn) {
-      btn.style.background = '#00f0ff';
-      btn.style.color = '#000';
+
+let currentHlsInstance = null;
+
+window.playStream = function(url) {
+  const box = document.querySelector('.player__box');
+  if (!box || !url) return;
+
+  if (currentHlsInstance) {
+    currentHlsInstance.destroy();
+    currentHlsInstance = null;
+  }
+
+  if (url.includes('.m3u8')) {
+    box.innerHTML = '<video id="cinema-video" controls playsinline autoplay style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;background:#000;"></video>';
+    const video = document.getElementById('cinema-video');
+    if (window.Hls && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        backBufferLength: 90
+      });
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, function() {
+        video.play().catch(e => console.log('Autoplay handled:', e));
+      });
+      currentHlsInstance = hls;
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      video.play().catch(e => console.log('Autoplay handled:', e));
     }
+  } else {
+    box.innerHTML = '<iframe src="' + url + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>';
+  }
+};
+
+window.switchServer = function(url, btn) {
+  playStream(url);
+  document.querySelectorAll('.server-list button').forEach(b => {
+    b.style.background = 'rgba(255,255,255,0.08)';
+    b.style.color = '#fff';
+  });
+  if (btn) {
+    btn.style.background = '#00f0ff';
+    btn.style.color = '#000';
   }
 };
 
 window.switchEpisode = function(url, btn) {
-  const iframe = document.querySelector('.player__box iframe');
-  if (iframe && url) {
-    iframe.src = url;
-    document.querySelectorAll('.ep-list button').forEach(b => {
-      b.style.background = 'rgba(255,255,255,0.08)';
-      b.style.color = '#fff';
-    });
-    if (btn) {
-      btn.style.background = '#00f0ff';
-      btn.style.color = '#000';
-    }
+  playStream(url);
+  document.querySelectorAll('.ep-list button').forEach(b => {
+    b.style.background = 'rgba(255,255,255,0.08)';
+    b.style.color = '#fff';
+  });
+  if (btn) {
+    btn.style.background = '#00f0ff';
+    btn.style.color = '#000';
   }
 };
 
@@ -318,7 +348,7 @@ async function renderWatchPage(slug) {
   const servers = movie.episodes || [];
   const firstServer = servers[0] || { server_data: [] };
   const firstEp = firstServer.server_data[0] || {};
-  const streamUrl = firstEp.link_embed || firstEp.link_m3u8 || '';
+  const streamUrl = firstEp.link_m3u8 || firstEp.link_embed || '';
 
   // Nguồn dự phòng Quốc tế qua TMDB ID (dùng Vidlink sạch không Captcha/Cloudflare)
   const tmdbId = movie.tmdb_id || (movie.tmdb && movie.tmdb.id);
@@ -328,7 +358,7 @@ async function renderWatchPage(slug) {
   let serverBtns = '';
   for (let idx = 0; idx < servers.length; idx++) {
     const s = servers[idx];
-    const sUrl = (s.server_data[0] && (s.server_data[0].link_embed || s.server_data[0].link_m3u8)) || '';
+    const sUrl = (s.server_data[0] && (s.server_data[0].link_m3u8 || s.server_data[0].link_embed)) || '';
     const bg = idx === 0 ? '#00f0ff' : 'rgba(255,255,255,0.08)';
     const col = idx === 0 ? '#000' : '#fff';
     serverBtns += '<button type="button" style="padding:10px 18px;background:' + bg + ';color:' + col + ';border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:0.2s;" onclick="switchServer(\'' + sUrl + '\', this)">▶ ' + s.server_name.replace(/[\r\n\t]+/g, ' ').trim() + '</button> ';
@@ -344,7 +374,7 @@ async function renderWatchPage(slug) {
       '<h3 style="color:#fff;font-size:16px;margin-bottom:10px;">Danh Sách Tập (' + firstServer.server_data.length + ' tập):</h3>' +
       '<div class="ep-list" style="display:flex;gap:8px;flex-wrap:wrap;max-height:240px;overflow-y:auto;padding-right:5px;">' +
       firstServer.server_data.map((ep, i) => {
-        const u = ep.link_embed || ep.link_m3u8 || '';
+        const u = ep.link_m3u8 || ep.link_embed || '';
         const bg = i === 0 ? '#00f0ff' : 'rgba(255,255,255,0.08)';
         const col = i === 0 ? '#000' : '#fff';
         return '<button type="button" style="padding:8px 14px;background:' + bg + ';color:' + col + ';border:1px solid rgba(255,255,255,0.1);border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;" onclick="switchEpisode(\'' + u + '\', this)">' + (ep.name || ('Tập ' + (i + 1))) + '</button>';
@@ -362,7 +392,6 @@ async function renderWatchPage(slug) {
       '</div>' +
     '</div>' +
     '<div class="player__box" style="position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:12px;overflow:hidden;box-shadow:0 15px 40px rgba(0,0,0,0.9);">' +
-      '<iframe src="' + streamUrl + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>' +
     '</div>' +
     '<div style="margin-top:20px;">' +
       '<h3 style="color:#fff;font-size:16px;margin-bottom:10px;">Chọn Máy Chủ Phát:</h3>' +
@@ -370,6 +399,7 @@ async function renderWatchPage(slug) {
     '</div>' +
     epHtml +
   '</div>';
+  playStream(streamUrl);
 }
 
 // 2. Tìm kiếm nhanh
