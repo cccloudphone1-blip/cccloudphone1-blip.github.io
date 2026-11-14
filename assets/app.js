@@ -1492,6 +1492,16 @@ async function renderWatchPage(slug) {
     }
   }
 
+  if (!streamUrl && showIntl && !isSeries && tmdbId) {
+    const btn123 = document.getElementById('btn123Embed');
+    if (btn123) {
+      btn123.style.background = '#00f0ff';
+      btn123.style.color = '#000';
+    }
+    play123EmbedM3u8(tmdbId, btn123);
+    return;
+  }
+
   playStream(streamUrl, resumeSeekTime);
 }
 
