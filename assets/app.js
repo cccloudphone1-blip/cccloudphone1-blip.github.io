@@ -192,13 +192,25 @@ async function resolveVsmovData(rawUrl) {
     if (subMatch && subMatch[1]) {
       try {
         const parsed = JSON.parse(subMatch[1]);
+        const getSubMeta = (s) => {
+          const c = String(s.code || '').toLowerCase().trim();
+          if (c === 'vie' || c === 'vi' || c.startsWith('vi')) return { norm: 'vie', label: s.label || 'Tiếng Việt', order: 1 };
+          if (c === 'zho' || c === 'chi' || c === 'zh' || c === 'cmn' || c.startsWith('zh')) return { norm: 'zho', label: s.label || 'Tiếng Trung', order: 2 };
+          if (c === 'eng' || c === 'en' || c.startsWith('en')) return { norm: 'eng', label: s.label || 'English', order: 3 };
+          return { norm: c || 'other', label: s.label || (s.code ? s.code.toUpperCase() : 'Khác'), order: 4 };
+        };
         subs = parsed
-          .filter(s => s && s.url && (s.code === 'vie' || s.code === 'eng'))
-          .map(s => ({
-            code: s.code,
-            label: s.label || (s.code === 'vie' ? 'Tiếng Việt' : 'English'),
-            src: s.url.startsWith('//') ? ('https:' + s.url) : (s.url.startsWith('/') ? (host + s.url) : s.url)
-          }));
+          .filter(s => s && s.url)
+          .map(s => {
+            const meta = getSubMeta(s);
+            return {
+              code: meta.norm,
+              order: meta.order,
+              label: meta.label,
+              src: s.url.startsWith('//') ? ('https:' + s.url) : (s.url.startsWith('/') ? (host + s.url) : s.url)
+            };
+          })
+          .sort((a, b) => a.order - b.order);
       } catch (pe) {}
     }
 
@@ -226,12 +238,43 @@ async function createCleanVttBlobUrl(vttUrl) {
 // ==========================================
 // 4. Khởi tạo & Điều khiển Trình phát Artplayer
 // ==========================================
+let activeStallWatchdog = null;
+
+function clearStallWatchdog() {
+  if (activeStallWatchdog) {
+    clearInterval(activeStallWatchdog);
+    activeStallWatchdog = null;
+  }
+}
+
+function tryFallbackToNextServer(reasonText) {
+  if (!currentMovieContext || !currentMovieContext.servers) return false;
+  const nextServerIdx = (currentMovieContext.currentServerIdx || 0) + 1;
+  if (nextServerIdx >= currentMovieContext.servers.length) return false;
+
+  const epIdx = currentMovieContext.currentEpIdx || 0;
+  const resumeSec = (currentArtInstance && currentArtInstance.currentTime > 2) ? currentArtInstance.currentTime : 0;
+  const serverBtns = document.querySelectorAll('.server-list button');
+  const nextBtn = serverBtns[nextServerIdx] || null;
+
+  console.warn('[SmartFallback]', reasonText, '-> Switching to server', nextServerIdx);
+  switchServer(nextServerIdx, nextBtn, epIdx, resumeSec);
+
+  setTimeout(() => {
+    if (currentArtInstance && currentArtInstance.notice) {
+      currentArtInstance.notice.show = reasonText || '⚡ Đã tự động chuyển sang máy chủ dự phòng mượt hơn!';
+    }
+  }, 600);
+  return true;
+}
+
 window.playStream = async function(url, initialSeekTime = 0) {
   const box = document.querySelector('.player__box');
   if (!box || !url) return;
 
   const seq = ++currentPlaySeq;
   clearAutoNext();
+  clearStallWatchdog();
 
   if (currentArtInstance) {
     try { currentArtInstance.destroy(false); } catch (e) {}
@@ -295,14 +338,93 @@ window.playStream = async function(url, initialSeekTime = 0) {
               const hls = new Hls({
                 enableWorker: true,
                 lowLatencyMode: false,
-                backBufferLength: 90
+                startFragPrefetch: true,
+                testBandwidth: true,
+                maxBufferLength: 60,
+                maxMaxBufferLength: 120,
+                maxBufferSize: 100 * 1000 * 1000,
+                maxBufferHole: 0.8,
+                highBufferWatchdogPeriod: 2,
+                nudgeOffset: 0.15,
+                nudgeMaxRetry: 5,
+                backBufferLength: 30,
+                abrEwmaDefaultEstimate: 2500000,
+                fragLoadingTimeOut: 25000,
+                fragLoadingMaxRetry: 4,
+                manifestLoadingTimeOut: 15000,
+                manifestLoadingMaxRetry: 4,
+                levelLoadingTimeOut: 15000,
+                levelLoadingMaxRetry: 4
               });
               hls.loadSource(m3u8Url);
               hls.attachMedia(video);
               artInst.hls = hls;
-              artInst.on('destroy', () => hls.destroy());
+              artInst.on('destroy', () => {
+                clearStallWatchdog();
+                hls.destroy();
+              });
+
+              // D. Bộ chọn Độ phân giải (Quality Selector) khi có nhiều luồng (1080p / 720p / 480p...)
+              hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                if (hls.levels && hls.levels.length > 1) {
+                  const qualitySelector = [
+                    { default: true, html: 'Tự động (Auto)', level: -1 },
+                    ...hls.levels.map((lv, idx) => ({
+                      default: false,
+                      html: lv.height ? `${lv.height}p` : `Mức ${idx + 1}`,
+                      level: idx
+                    })).reverse()
+                  ];
+                  try {
+                    artInst.setting.add({
+                      html: 'Chất lượng',
+                      width: 200,
+                      tooltip: 'Tự động',
+                      selector: qualitySelector,
+                      onSelect: function(item) {
+                        hls.currentLevel = item.level;
+                        artInst.notice.show = `📺 Chất lượng: ${item.html}`;
+                        return item.html;
+                      }
+                    });
+                  } catch (qe) {}
+                } else {
+                  try {
+                    artInst.setting.add({
+                      html: 'Chất lượng',
+                      width: 200,
+                      tooltip: 'Gốc (FHD)',
+                      selector: [{ default: true, html: 'Bản gốc (Single Stream)' }],
+                      onSelect: function(item) { return item.html; }
+                    });
+                  } catch (qe) {}
+                }
+              });
+
+              let fatalRetryCount = 0;
               hls.on(Hls.Events.ERROR, function(evt, data) {
+                // Xử lý non-fatal BUFFER_STALLED_ERROR (bị kẹt micro-gap gây quay tròn)
+                if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || data.details === 'bufferStalledError') {
+                  if (video.buffered && video.buffered.length > 0) {
+                    for (let i = 0; i < video.buffered.length; i++) {
+                      const bStart = video.buffered.start(i);
+                      if (bStart > video.currentTime && bStart - video.currentTime < 1.5) {
+                        video.currentTime = bStart + 0.05;
+                        break;
+                      }
+                    }
+                  }
+                  hls.startLoad();
+                  return;
+                }
+
                 if (data.fatal) {
+                  fatalRetryCount++;
+                  if (fatalRetryCount >= 3) {
+                    if (tryFallbackToNextServer('⚠️ Máy chủ bị nghẽn, đang tự chuyển máy chủ dự phòng...')) {
+                      return;
+                    }
+                  }
                   if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                     hls.startLoad();
                   } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
@@ -310,6 +432,45 @@ window.playStream = async function(url, initialSeekTime = 0) {
                   }
                 }
               });
+
+              // Watchdog chống kẹt quay tròn kéo dài
+              let lastTrackedTime = -1;
+              let stallSeconds = 0;
+              clearStallWatchdog();
+              activeStallWatchdog = setInterval(() => {
+                if (seq !== currentPlaySeq || !video || video.paused || video.ended) {
+                  stallSeconds = 0;
+                  return;
+                }
+                if (video.readyState < 3 && Math.abs(video.currentTime - lastTrackedTime) < 0.05) {
+                  stallSeconds++;
+                  // Sau 2s đứng hình: thử nhích nhẹ qua khe rỗng và kích tải lại
+                  if (stallSeconds === 2) {
+                    hls.startLoad();
+                    if (video.buffered && video.buffered.length > 0) {
+                      for (let i = 0; i < video.buffered.length; i++) {
+                        if (video.buffered.start(i) > video.currentTime && video.buffered.start(i) - video.currentTime < 1.5) {
+                          video.currentTime = video.buffered.start(i) + 0.05;
+                          break;
+                        }
+                      }
+                    } else if (video.currentTime > 0) {
+                      video.currentTime += 0.1;
+                    }
+                  }
+                  // Sau 7s vẫn quay tròn không thoát: tự động chuyển sang server dự phòng (nếu có)
+                  if (stallSeconds >= 7) {
+                    stallSeconds = 0;
+                    if (!tryFallbackToNextServer('⚠️ Luồng phát đang chậm, tự động đổi máy chủ dự phòng...')) {
+                      artInst.notice.show = '⚠️ Mạng tới máy chủ phim đang chậm, bạn thử tải lại hoặc đổi tập/máy chủ khác!';
+                      hls.startLoad();
+                    }
+                  }
+                } else {
+                  stallSeconds = 0;
+                }
+                lastTrackedTime = video.currentTime;
+              }, 1000);
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
               video.src = m3u8Url;
             }
@@ -462,7 +623,7 @@ function renderSubtitleButtons(box, subTracks, activeSub) {
 
   subTracks.forEach(st => {
     const isAct = activeSub && activeSub.code === st.code;
-    const flag = st.code === 'vie' ? '🇻🇳 ' : (st.code === 'eng' ? '🇬🇧 ' : '');
+    const flag = st.code === 'vie' ? '🇻🇳 ' : (st.code === 'zho' ? '🇨🇳 ' : (st.code === 'eng' ? '🇬🇧 ' : '🌐 '));
     btns += `<button type="button" class="sub-btn" data-url="${st.url}" onclick="switchSubManual('${st.url}', this)" style="padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;border:1px solid rgba(255,255,255,0.1);${isAct ? 'background:#00f0ff;color:#000;' : 'background:rgba(255,255,255,0.08);color:#fff;'}">${flag}${st.label}</button>`;
   });
 
@@ -517,24 +678,26 @@ window.switchEpisode = function(epIdx) {
   });
 };
 
-window.switchServer = function(serverIdx, btn) {
+window.switchServer = function(serverIdx, btn, targetEpIdx = 0, resumeTime = 0) {
   if (!currentMovieContext || !currentMovieContext.servers || !currentMovieContext.servers[serverIdx]) return;
   currentMovieContext.currentServerIdx = serverIdx;
   const server = currentMovieContext.servers[serverIdx];
   currentMovieContext.episodes = server.server_data || [];
-  currentMovieContext.currentEpIdx = 0;
+  const safeEpIdx = (targetEpIdx >= 0 && targetEpIdx < currentMovieContext.episodes.length) ? targetEpIdx : 0;
+  currentMovieContext.currentEpIdx = safeEpIdx;
 
   // Re-render episode list
   const epContainer = document.getElementById('episodeSection');
   if (epContainer && currentMovieContext.episodes.length > 1) {
-    epContainer.innerHTML = renderEpisodeButtonsHtml(currentMovieContext.episodes, 0);
+    epContainer.innerHTML = renderEpisodeButtonsHtml(currentMovieContext.episodes, safeEpIdx);
   } else if (epContainer) {
     epContainer.innerHTML = '';
   }
 
-  const firstEp = currentMovieContext.episodes[0] || {};
-  const sUrl = firstEp.link_m3u8 || firstEp.link_embed || '';
-  playStream(sUrl, 0);
+  const targetEp = currentMovieContext.episodes[safeEpIdx] || {};
+  currentMovieContext.currentEpName = targetEp.name || ('Tập ' + (safeEpIdx + 1));
+  const sUrl = targetEp.link_m3u8 || targetEp.link_embed || '';
+  playStream(sUrl, resumeTime);
 
   document.querySelectorAll('.server-list button').forEach(b => {
     b.style.background = 'rgba(255,255,255,0.08)';
