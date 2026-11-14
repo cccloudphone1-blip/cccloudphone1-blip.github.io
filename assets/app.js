@@ -172,19 +172,24 @@ function showAutoNextCountdown(nextEp, nextEpIdx) {
 // ==========================================
 async function resolveVsmovData(rawUrl) {
   const m = rawUrl.match(/^https:\/\/(v\d+\.streamvsmov\.com)\/stream\/([a-zA-Z0-9-]+)\/master\.m3u8/);
-  if (!m) return { url: rawUrl, subtitles: [] };
+  if (!m) return { url: rawUrl, subtitles: [], failed: false };
   const host = 'https://' + m[1];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
   try {
     const embedUrl = host + '/video/' + m[2];
     const workerUrl = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(embedUrl);
-    const resp = await fetch(workerUrl);
-    if (!resp.ok) return { url: rawUrl, subtitles: [] };
+    const resp = await fetch(workerUrl, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return { url: rawUrl, subtitles: [], failed: true };
     const html = await resp.text();
 
     let resolvedUrl = rawUrl;
     const sigMatch = html.match(/signedMasterUrl:\s*"([^"]+)"/);
     if (sigMatch && sigMatch[1]) {
       resolvedUrl = sigMatch[1];
+    } else {
+      return { url: rawUrl, subtitles: [], failed: true };
     }
 
     let subs = [];
@@ -214,9 +219,10 @@ async function resolveVsmovData(rawUrl) {
       } catch (pe) {}
     }
 
-    return { url: resolvedUrl, subtitles: subs };
+    return { url: resolvedUrl, subtitles: subs, failed: false };
   } catch (e) {
-    return { url: rawUrl, subtitles: [] };
+    clearTimeout(timer);
+    return { url: rawUrl, subtitles: [], failed: true };
   }
 }
 
@@ -247,9 +253,46 @@ function clearStallWatchdog() {
   }
 }
 
-function tryFallbackToNextServer(reasonText) {
+let kkphimFallbackFetchedForSlug = null;
+
+async function tryFallbackToNextServer(reasonText) {
   if (!currentMovieContext || !currentMovieContext.servers) return false;
-  const nextServerIdx = (currentMovieContext.currentServerIdx || 0) + 1;
+  let nextServerIdx = (currentMovieContext.currentServerIdx || 0) + 1;
+
+  // Nếu đã hết server trong bucket, thử lấy thêm nguồn dự phòng trực tiếp từ KKPhim (CORS public)
+  if (nextServerIdx >= currentMovieContext.servers.length && kkphimFallbackFetchedForSlug !== currentMovieContext.slug) {
+    kkphimFallbackFetchedForSlug = currentMovieContext.slug;
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 7000);
+      const res = await fetch('https://phimapi.com/phim/' + encodeURIComponent(currentMovieContext.slug), { signal: ctrl.signal });
+      clearTimeout(t);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.status && Array.isArray(data.episodes) && data.episodes.length > 0) {
+          const newServers = data.episodes.filter(s => s && Array.isArray(s.server_data) && s.server_data.length > 0);
+          if (newServers.length > 0) {
+            const listEl = document.querySelector('.server-list');
+            newServers.forEach(ns => {
+              const newIdx = currentMovieContext.servers.length;
+              currentMovieContext.servers.push(ns);
+              if (listEl) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.style.cssText = 'padding:10px 18px;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:0.2s;';
+                btn.textContent = '▶ Dự phòng (' + (ns.server_name || 'VIP').replace(/[\r\n\t]+/g, ' ').trim() + ')';
+                btn.onclick = function() { switchServer(newIdx, btn); };
+                listEl.appendChild(btn);
+              }
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Fallback API error]', e);
+    }
+  }
+
   if (nextServerIdx >= currentMovieContext.servers.length) return false;
 
   const epIdx = currentMovieContext.currentEpIdx || 0;
@@ -293,6 +336,10 @@ window.playStream = async function(url, initialSeekTime = 0) {
     if (url.includes('streamvsmov.com/stream/') && !url.includes('signature=')) {
       const resolved = await resolveVsmovData(url);
       if (seq !== currentPlaySeq) return;
+      if (resolved.failed) {
+        const switched = await tryFallbackToNextServer('⚠️ Máy chủ chính phản hồi chậm, tự động chuyển nguồn dự phòng...');
+        if (switched) return;
+      }
       finalUrl = resolved.url;
       subtitles = resolved.subtitles;
     }
@@ -402,7 +449,7 @@ window.playStream = async function(url, initialSeekTime = 0) {
               });
 
               let fatalRetryCount = 0;
-              hls.on(Hls.Events.ERROR, function(evt, data) {
+              hls.on(Hls.Events.ERROR, async function(evt, data) {
                 // Xử lý non-fatal BUFFER_STALLED_ERROR (bị kẹt micro-gap gây quay tròn)
                 if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || data.details === 'bufferStalledError') {
                   if (video.buffered && video.buffered.length > 0) {
@@ -421,7 +468,7 @@ window.playStream = async function(url, initialSeekTime = 0) {
                 if (data.fatal) {
                   fatalRetryCount++;
                   if (fatalRetryCount >= 3) {
-                    if (tryFallbackToNextServer('⚠️ Máy chủ bị nghẽn, đang tự chuyển máy chủ dự phòng...')) {
+                    if (await tryFallbackToNextServer('⚠️ Máy chủ bị nghẽn, đang tự chuyển máy chủ dự phòng...')) {
                       return;
                     }
                   }
@@ -437,7 +484,7 @@ window.playStream = async function(url, initialSeekTime = 0) {
               let lastTrackedTime = -1;
               let stallSeconds = 0;
               clearStallWatchdog();
-              activeStallWatchdog = setInterval(() => {
+              activeStallWatchdog = setInterval(async () => {
                 if (seq !== currentPlaySeq || !video || video.paused || video.ended) {
                   stallSeconds = 0;
                   return;
@@ -461,7 +508,8 @@ window.playStream = async function(url, initialSeekTime = 0) {
                   // Sau 7s vẫn quay tròn không thoát: tự động chuyển sang server dự phòng (nếu có)
                   if (stallSeconds >= 7) {
                     stallSeconds = 0;
-                    if (!tryFallbackToNextServer('⚠️ Luồng phát đang chậm, tự động đổi máy chủ dự phòng...')) {
+                    const ok = await tryFallbackToNextServer('⚠️ Luồng phát đang chậm, tự động đổi máy chủ dự phòng...');
+                    if (!ok) {
                       artInst.notice.show = '⚠️ Mạng tới máy chủ phim đang chậm, bạn thử tải lại hoặc đổi tập/máy chủ khác!';
                       hls.startLoad();
                     }
