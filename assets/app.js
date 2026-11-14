@@ -185,11 +185,14 @@ async function resolveVsmovData(rawUrl) {
     const html = await resp.text();
 
     let resolvedUrl = rawUrl;
-    const sigMatch = html.match(/signedMasterUrl:\s*"([^"]+)"/);
+    const enableSignedMatch = html.match(/enableSignedUrl:\s*(true|false)/);
+    const sigMatch = html.match(/signedMasterUrl:\s*"([^"]*)"/);
     if (sigMatch && sigMatch[1]) {
       resolvedUrl = sigMatch[1];
+    } else if ((enableSignedMatch && enableSignedMatch[1] === 'false') || (html.includes('playerOptions') && sigMatch)) {
+      resolvedUrl = rawUrl;
     } else {
-      return { url: rawUrl, embedUrl, subtitles: [], failed: true, reason: 'Không tìm thấy chữ ký luồng' };
+      return { url: rawUrl, embedUrl, subtitles: [], failed: true, reason: 'Không tìm thấy cấu hình luồng VSMov' };
     }
 
     let subs = [];
