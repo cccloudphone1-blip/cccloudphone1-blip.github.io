@@ -270,7 +270,16 @@ async function tryFallbackToNextServer(reasonText) {
       if (res.ok) {
         const data = await res.json();
         if (data && data.status && Array.isArray(data.episodes) && data.episodes.length > 0) {
-          const newServers = data.episodes.filter(s => s && Array.isArray(s.server_data) && s.server_data.length > 0);
+          const newServers = data.episodes
+            .filter(s => s && Array.isArray(s.server_data) && s.server_data.length > 0)
+            .map(s => ({
+              ...s,
+              // Nguồn KKPhim (.m3u8 từ phim1280/kvp) thường chặn CORS khi gọi XHR từ domain ngoài -> ưu tiên link_embed nếu có
+              server_data: s.server_data.map(ep => ({
+                ...ep,
+                link_m3u8: ep.link_embed ? '' : ep.link_m3u8
+              }))
+            }));
           if (newServers.length > 0) {
             const listEl = document.querySelector('.server-list');
             newServers.forEach(ns => {
