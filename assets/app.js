@@ -539,7 +539,7 @@ window.playStream = async function(url, initialSeekTime = 0) {
             textShadow: '0 2px 4px rgba(0,0,0,0.95)',
             bottom: '36px'
           }
-        } : undefined,
+        } : { url: '', type: 'vtt' },
         settings: subTracks.length > 0 ? [
           {
             html: 'Phụ đề',
