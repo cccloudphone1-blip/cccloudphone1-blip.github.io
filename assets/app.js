@@ -7,23 +7,44 @@
 let currentHlsInstance = null;
 let currentPlaySeq = 0;
 
-async function resolveSignedVsmovM3u8(rawUrl) {
+async function resolveVsmovData(rawUrl) {
   const m = rawUrl.match(/^https:\/\/(v\d+\.streamvsmov\.com)\/stream\/([a-zA-Z0-9-]+)\/master\.m3u8/);
-  if (!m) return rawUrl;
+  if (!m) return { url: rawUrl, subtitles: [] };
+  const host = 'https://' + m[1];
   try {
-    const embedUrl = 'https://' + m[1] + '/video/' + m[2];
+    const embedUrl = host + '/video/' + m[2];
     const workerUrl = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(embedUrl);
     const resp = await fetch(workerUrl);
-    if (!resp.ok) return rawUrl;
+    if (!resp.ok) return { url: rawUrl, subtitles: [] };
     const html = await resp.text();
+
+    let resolvedUrl = rawUrl;
     const sigMatch = html.match(/signedMasterUrl:\s*"([^"]+)"/);
     if (sigMatch && sigMatch[1]) {
-      return sigMatch[1];
+      resolvedUrl = sigMatch[1];
     }
+
+    let subs = [];
+    const subMatch = html.match(/subtitles:\s*(\[[\s\S]*?\])\s*,/);
+    if (subMatch && subMatch[1]) {
+      try {
+        const parsed = JSON.parse(subMatch[1]);
+        subs = parsed
+          .filter(s => s && s.url && (s.code === 'vie' || s.code === 'eng'))
+          .map(s => ({
+            code: s.code,
+            label: s.code === 'vie' ? 'Tiếng Việt' : 'English',
+            src: s.url.startsWith('http') ? s.url : (host + s.url)
+          }));
+      } catch (pe) {
+        console.warn('Subtitle JSON parse error:', pe);
+      }
+    }
+    return { url: resolvedUrl, subtitles: subs };
   } catch (e) {
     console.warn('Worker resolve fallback to raw m3u8:', e);
   }
-  return rawUrl;
+  return { url: rawUrl, subtitles: [] };
 }
 
 window.playStream = async function(url) {
@@ -38,15 +59,36 @@ window.playStream = async function(url) {
   }
 
   if (url.includes('.m3u8')) {
-    box.innerHTML = '<video id="cinema-video" controls playsinline autoplay style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;background:#000;"></video>';
+    box.innerHTML = '<video id="cinema-video" controls playsinline autoplay crossorigin="anonymous" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;background:#000;"></video>';
     let finalUrl = url;
+    let subtitles = [];
     if (url.includes('streamvsmov.com/stream/') && !url.includes('signature=')) {
-      finalUrl = await resolveSignedVsmovM3u8(url);
+      const resolved = await resolveVsmovData(url);
       if (seq !== currentPlaySeq) return;
+      finalUrl = resolved.url;
+      subtitles = resolved.subtitles;
     }
 
     const video = document.getElementById('cinema-video');
     if (!video) return;
+
+    subtitles.forEach((sub, idx) => {
+      const track = document.createElement('track');
+      track.kind = 'subtitles';
+      track.label = sub.label;
+      track.srclang = sub.code === 'vie' ? 'vi' : 'en';
+      track.src = sub.src;
+      if (sub.code === 'vie' || idx === 0) {
+        track.default = true;
+      }
+      video.appendChild(track);
+    });
+
+    if (video.textTracks && video.textTracks.length > 0) {
+      for (let i = 0; i < video.textTracks.length; i++) {
+        video.textTracks[i].mode = (video.textTracks[i].language === 'vi') ? 'showing' : 'hidden';
+      }
+    }
 
     if (window.Hls && Hls.isSupported()) {
       const hls = new Hls({
