@@ -1592,6 +1592,56 @@ html { overflow-x: hidden; }
    - Hiện tại chưa có luật nào — cùng sửa tiếp với James.
    ============================================================ */
 
+
+/* Artplayer & Modern Subtitle Customization */
+.player__box .art-video-player {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+.art-subtitle {
+  bottom: 36px !important;
+}
+.art-subtitle p {
+  background: rgba(0, 0, 0, 0.78) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  padding: 4px 14px !important;
+  border-radius: 6px !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  line-height: 1.4 !important;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95) !important;
+  font-size: 20px !important;
+  display: inline-block !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+}
+.auto-next-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 6, 13, 0.88);
+  backdrop-filter: blur(8px);
+  z-index: 99;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  animation: modalFadeIn 0.25s ease-out;
+}
+.auto-next-card {
+  background: #131722;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 14px;
+  padding: 24px 32px;
+  max-width: 420px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+}
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 </style>
 <script>
   /* HỦY DIỆT TRIỆT ĐỂ MỌI SERVICE WORKER VÀ CACHE CŨ ĐỂ KHÔNG BAO GIỜ BỊ KẸT MÀN HÌNH XOAY */
@@ -1746,6 +1796,8 @@ html { overflow-x: hidden; }
 </footer>
 
 
-<script src="/assets/app.js?v=20261112_clean"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/artplayer/5.1.7/artplayer.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.min.js"></script>
+<script src="/assets/app.js?v=20261114_artplayer_v1"></script>
 </body>
 </html>

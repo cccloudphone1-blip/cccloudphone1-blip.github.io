@@ -1,0 +1,40 @@
+name: Daily Movie & Episode Update
+
+on:
+  schedule:
+    # 20:00 UTC = 03:00 AM UTC+7 (Hanoi) every day
+    - cron: '0 20 * * *'
+  workflow_dispatch: # Allows manual trigger anytime from GitHub Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Daily Update Script
+        run: |
+          python scripts/daily_update.py
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "No catalog changes to commit today."
+          else
+            git commit -m "chore(auto): update latest episodes and movies [skip ci]"
+            git push origin master
+          fi
