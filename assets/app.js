@@ -84,34 +84,8 @@ window.playStream = async function(url) {
       subtitles = resolved.subtitles;
     }
 
-    const blobSubs = await Promise.all(
-      subtitles.map(async sub => ({
-        ...sub,
-        blobSrc: await createCleanVttBlobUrl(sub.src)
-      }))
-    );
-    if (seq !== currentPlaySeq) return;
-
     const video = document.getElementById('cinema-video');
     if (!video) return;
-
-    blobSubs.forEach((sub, idx) => {
-      const track = document.createElement('track');
-      track.kind = 'subtitles';
-      track.label = sub.label;
-      track.srclang = sub.code === 'vie' ? 'vi' : 'en';
-      track.src = sub.blobSrc;
-      if (sub.code === 'vie' || idx === 0) {
-        track.default = true;
-      }
-      video.appendChild(track);
-    });
-
-    if (video.textTracks && video.textTracks.length > 0) {
-      for (let i = 0; i < video.textTracks.length; i++) {
-        video.textTracks[i].mode = (video.textTracks[i].language === 'vi') ? 'showing' : 'hidden';
-      }
-    }
 
     if (window.Hls && Hls.isSupported()) {
       const hls = new Hls({
@@ -124,10 +98,48 @@ window.playStream = async function(url) {
       hls.on(Hls.Events.MANIFEST_PARSED, function() {
         video.play().catch(e => console.log('Autoplay handled:', e));
       });
+      hls.on(Hls.Events.ERROR, function(event, data) {
+        if (data.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+          }
+        }
+      });
       currentHlsInstance = hls;
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = finalUrl;
       video.play().catch(e => console.log('Autoplay handled:', e));
+    }
+
+    if (subtitles.length > 0) {
+      Promise.all(
+        subtitles.map(async sub => ({
+          ...sub,
+          blobSrc: await createCleanVttBlobUrl(sub.src)
+        }))
+      ).then(blobSubs => {
+        if (seq !== currentPlaySeq) return;
+        const v = document.getElementById('cinema-video');
+        if (!v) return;
+        blobSubs.forEach((sub, idx) => {
+          const track = document.createElement('track');
+          track.kind = 'subtitles';
+          track.label = sub.label;
+          track.srclang = sub.code === 'vie' ? 'vi' : 'en';
+          track.src = sub.blobSrc;
+          if (sub.code === 'vie' || idx === 0) {
+            track.default = true;
+          }
+          v.appendChild(track);
+        });
+        if (v.textTracks && v.textTracks.length > 0) {
+          for (let i = 0; i < v.textTracks.length; i++) {
+            v.textTracks[i].mode = (v.textTracks[i].language === 'vi') ? 'showing' : 'hidden';
+          }
+        }
+      }).catch(e => console.warn('Subtitle load error:', e));
     }
   } else {
     box.innerHTML = '<iframe src="' + url + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>';
