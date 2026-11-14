@@ -264,7 +264,7 @@ async function tryFallbackToNextServer(reasonText) {
     kkphimFallbackFetchedForSlug = currentMovieContext.slug;
     try {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 7000);
+      const t = setTimeout(() => ctrl.abort(), 15000);
       const res = await fetch('https://phimapi.com/phim/' + encodeURIComponent(currentMovieContext.slug), { signal: ctrl.signal });
       clearTimeout(t);
       if (res.ok) {
