@@ -5,10 +5,25 @@
 
 
 let currentHlsInstance = null;
+let currentPlaySeq = 0;
 
-window.playStream = function(url) {
+async function resolveSignedVsmovM3u8(rawUrl) {
+  const m = rawUrl.match(/^https:\/\/(v\d+\.streamvsmov\.com)\/stream\/([a-zA-Z0-9-]+)\/master\.m3u8/);
+  if (!m) return null;
+  const embedUrl = 'https://' + m[1] + '/video/' + m[2];
+  const workerUrl = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(embedUrl);
+  const resp = await fetch(workerUrl);
+  if (!resp.ok) return null;
+  const html = await resp.text();
+  const sigMatch = html.match(/signedMasterUrl:\s*"([^"]+)"/);
+  return sigMatch ? sigMatch[1] : null;
+}
+
+window.playStream = function(url, isSignedRetry) {
   const box = document.querySelector('.player__box');
   if (!box || !url) return;
+
+  const seq = ++currentPlaySeq;
 
   if (currentHlsInstance) {
     currentHlsInstance.destroy();
@@ -29,9 +44,29 @@ window.playStream = function(url) {
       hls.on(Hls.Events.MANIFEST_PARSED, function() {
         video.play().catch(e => console.log('Autoplay handled:', e));
       });
+      hls.on(Hls.Events.ERROR, async function(event, data) {
+        if (!isSignedRetry && data.fatal && data.details === 'manifestLoadError' && url.includes('streamvsmov.com/stream/')) {
+          try {
+            const signedUrl = await resolveSignedVsmovM3u8(url);
+            if (signedUrl && seq === currentPlaySeq) {
+              window.playStream(signedUrl, true);
+            }
+          } catch (e) {
+            console.error('Failed to resolve signed m3u8:', e);
+          }
+        }
+      });
       currentHlsInstance = hls;
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
+      if (!isSignedRetry && url.includes('streamvsmov.com/stream/')) {
+        video.addEventListener('error', async function() {
+          const signedUrl = await resolveSignedVsmovM3u8(url);
+          if (signedUrl && seq === currentPlaySeq) {
+            window.playStream(signedUrl, true);
+          }
+        }, { once: true });
+      }
       video.play().catch(e => console.log('Autoplay handled:', e));
     }
   } else {
