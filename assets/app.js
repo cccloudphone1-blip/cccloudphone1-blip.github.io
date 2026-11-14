@@ -170,18 +170,61 @@ function showAutoNextCountdown(nextEp, nextEpIdx) {
 // ==========================================
 // 3. VSMov Worker Proxy & Subtitle Loader
 // ==========================================
-async function resolveVsmovData(rawUrl) {
+const vsmovNodeHealthCache = {};
+
+/** Chuẩn hóa danh sách phụ đề từ VSMov hoặc 123Embed (ưu tiên Việt -> Trung -> Anh). */
+function normalizeSubtitleList(parsed, baseHost) {
+  if (!Array.isArray(parsed)) return [];
+  const getSubMeta = (s) => {
+    const c = String(s.code || '').toLowerCase().trim();
+    const lbl = String(s.label || '').toLowerCase().trim();
+    const f = String(s.url || s.file || '').toLowerCase();
+    if (c === 'vie' || c === 'vi' || c.startsWith('vi') || lbl.includes('viet') || f.includes('.vie.')) {
+      return { norm: 'vie', label: 'Tiếng Việt', order: 1 };
+    }
+    if (c === 'zho' || c === 'chi' || c === 'zh' || c === 'cmn' || c.startsWith('zh') || lbl.includes('chin') || lbl.includes('trung') || f.includes('.chi.')) {
+      return { norm: 'zho', label: 'Tiếng Trung', order: 2 };
+    }
+    if (c === 'eng' || c === 'en' || c.startsWith('en') || lbl.includes('eng') || f.includes('.eng.')) {
+      return { norm: 'eng', label: 'English', order: 3 };
+    }
+    return { norm: c || 'other', label: s.label || (s.code ? s.code.toUpperCase() : 'Khác'), order: 4 };
+  };
+
+  const seen = new Set();
+  return parsed
+    .filter(s => s && (s.url || s.file))
+    .map(s => {
+      const rawSrc = s.url || s.file;
+      const meta = getSubMeta(s);
+      const src = rawSrc.startsWith('//') ? ('https:' + rawSrc) : (rawSrc.startsWith('/') && baseHost ? (baseHost + rawSrc) : rawSrc);
+      return { code: meta.norm, order: meta.order, label: meta.label, src };
+    })
+    .filter(s => {
+      const key = s.code + '|' + s.label;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.order - b.order);
+}
+
+async function resolveVsmovData(rawUrl, timeoutMs = 18000) {
   const m = rawUrl.match(/^https:\/\/(v\d+\.streamvsmov\.com)\/stream\/([a-zA-Z0-9-]+)\/master\.m3u8/);
   if (!m) return { url: rawUrl, embedUrl: '', subtitles: [], failed: false, reason: '' };
-  const host = 'https://' + m[1];
+  const hostKey = m[1];
+  const host = 'https://' + hostKey;
   const embedUrl = host + '/video/' + m[2];
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 18000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const workerUrl = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(embedUrl);
     const resp = await fetch(workerUrl, { signal: controller.signal });
     clearTimeout(timer);
-    if (!resp.ok) return { url: rawUrl, embedUrl, subtitles: [], failed: true, reason: 'HTTP ' + resp.status };
+    if (!resp.ok) {
+      vsmovNodeHealthCache[hostKey] = { status: 'congested', ts: Date.now() };
+      return { url: rawUrl, embedUrl, subtitles: [], failed: true, reason: 'HTTP ' + resp.status };
+    }
     const html = await resp.text();
 
     let resolvedUrl = rawUrl;
@@ -192,6 +235,7 @@ async function resolveVsmovData(rawUrl) {
     } else if ((enableSignedMatch && enableSignedMatch[1] === 'false') || (html.includes('playerOptions') && sigMatch)) {
       resolvedUrl = rawUrl;
     } else {
+      vsmovNodeHealthCache[hostKey] = { status: 'congested', ts: Date.now() };
       return { url: rawUrl, embedUrl, subtitles: [], failed: true, reason: 'Không tìm thấy cấu hình luồng VSMov' };
     }
 
@@ -199,34 +243,52 @@ async function resolveVsmovData(rawUrl) {
     const subMatch = html.match(/subtitles:\s*(\[[\s\S]*?\])\s*,/);
     if (subMatch && subMatch[1]) {
       try {
-        const parsed = JSON.parse(subMatch[1]);
-        const getSubMeta = (s) => {
-          const c = String(s.code || '').toLowerCase().trim();
-          if (c === 'vie' || c === 'vi' || c.startsWith('vi')) return { norm: 'vie', label: s.label || 'Tiếng Việt', order: 1 };
-          if (c === 'zho' || c === 'chi' || c === 'zh' || c === 'cmn' || c.startsWith('zh')) return { norm: 'zho', label: s.label || 'Tiếng Trung', order: 2 };
-          if (c === 'eng' || c === 'en' || c.startsWith('en')) return { norm: 'eng', label: s.label || 'English', order: 3 };
-          return { norm: c || 'other', label: s.label || (s.code ? s.code.toUpperCase() : 'Khác'), order: 4 };
-        };
-        subs = parsed
-          .filter(s => s && s.url)
-          .map(s => {
-            const meta = getSubMeta(s);
-            return {
-              code: meta.norm,
-              order: meta.order,
-              label: meta.label,
-              src: s.url.startsWith('//') ? ('https:' + s.url) : (s.url.startsWith('/') ? (host + s.url) : s.url)
-            };
-          })
-          .sort((a, b) => a.order - b.order);
+        subs = normalizeSubtitleList(JSON.parse(subMatch[1]), host);
       } catch (pe) {}
     }
 
+    vsmovNodeHealthCache[hostKey] = { status: 'ok', ts: Date.now() };
     return { url: resolvedUrl, embedUrl, subtitles: subs, failed: false, reason: '' };
   } catch (e) {
     clearTimeout(timer);
-    const reason = (e && e.name === 'AbortError') ? 'Hết thời gian chờ (18s)' : 'Lỗi kết nối';
+    vsmovNodeHealthCache[hostKey] = { status: 'congested', ts: Date.now() };
+    const reason = (e && e.name === 'AbortError') ? `Hết thời gian chờ (${Math.round(timeoutMs / 1000)}s)` : 'Lỗi kết nối';
     return { url: rawUrl, embedUrl, subtitles: [], failed: true, reason };
+  }
+}
+
+/** Tách luồng .m3u8 và phụ đề .srt sạch (không quảng cáo) từ 123Embed theo TMDB ID phim lẻ. */
+async function resolve123EmbedData(tmdbId) {
+  const embedPage = 'https://play.123embed.net/mv/' + encodeURIComponent(tmdbId);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const w1 = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(embedPage);
+    const r1 = await fetch(w1, { signal: controller.signal });
+    if (!r1.ok) { clearTimeout(timer); return { failed: true, embedUrl: embedPage }; }
+    const html = await r1.text();
+    const srvMatch = html.match(/loadMovieServer\(\s*['"](\d+)['"]\s*,\s*['"]([a-zA-Z0-9_-]+)['"]\s*\)/);
+    if (!srvMatch) { clearTimeout(timer); return { failed: true, embedUrl: embedPage }; }
+
+    const ajaxUrl = `https://play.123embed.net/ajax/movie/get_sources/${srvMatch[1]}/${srvMatch[2]}`;
+    const w2 = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(ajaxUrl);
+    const r2 = await fetch(w2, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!r2.ok) return { failed: true, embedUrl: embedPage };
+
+    const data = await r2.json();
+    const sources = typeof data.sources === 'string' ? JSON.parse(data.sources) : (data.sources || []);
+    const hlsSource = sources.find(s => s && s.file && s.file.includes('.m3u8')) || sources[0];
+    if (!hlsSource || !hlsSource.file || !hlsSource.file.includes('.m3u8')) {
+      return { failed: true, embedUrl: embedPage };
+    }
+
+    const rawTracks = typeof data.tracks === 'string' ? JSON.parse(data.tracks) : (data.tracks || []);
+    const subs = normalizeSubtitleList(rawTracks, 'https://subtitle.123embed.net');
+    return { url: hlsSource.file, embedUrl: embedPage, subtitles: subs, failed: false };
+  } catch (e) {
+    clearTimeout(timer);
+    return { failed: true, embedUrl: embedPage };
   }
 }
 
@@ -371,7 +433,7 @@ function showVsmovRecoveryPanel(box, rawUrl, embedUrl, initialSeekTime, reasonTe
   box.appendChild(wrap);
 }
 
-window.playStream = async function(url, initialSeekTime = 0) {
+window.playStream = async function(url, initialSeekTime = 0, preResolved = null) {
   const box = document.querySelector('.player__box');
   if (!box || !url) return;
 
@@ -393,11 +455,14 @@ window.playStream = async function(url, initialSeekTime = 0) {
 
   const isDirectM3u8 = url.includes('.m3u8') && !url.includes('player.phimapi.com/player') && !url.includes('/embed/');
   if (isDirectM3u8) {
-    box.innerHTML = '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#00f0ff;font-size:16px;background:#000;padding:20px;text-align:center;"><div>⚡ Đang kết nối máy chủ VSMov...</div><div id="vsmovLoadHint" style="font-size:12px;color:#8b94a7;"></div></div>';
+    box.innerHTML = '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#00f0ff;font-size:16px;background:#000;padding:20px;text-align:center;"><div>⚡ Đang kết nối máy chủ phát sạch...</div><div id="vsmovLoadHint" style="font-size:12px;color:#8b94a7;"></div></div>';
 
     let finalUrl = url;
     let subtitles = [];
-    if (url.includes('streamvsmov.com/stream/') && !url.includes('signature=')) {
+    if (preResolved && !preResolved.failed) {
+      finalUrl = preResolved.url || url;
+      subtitles = preResolved.subtitles || [];
+    } else if (url.includes('streamvsmov.com/stream/') && !url.includes('signature=')) {
       const slowHintTimer = setTimeout(() => {
         if (seq !== currentPlaySeq) return;
         const hint = document.getElementById('vsmovLoadHint');
@@ -866,6 +931,28 @@ window.playIntlSource = function(embedUrl, btn) {
   }
 };
 
+window.play123EmbedM3u8 = async function(tmdbId, btn, resumeTime = 0) {
+  clearAutoNext();
+  document.querySelectorAll('.server-list button').forEach(b => {
+    b.style.background = 'rgba(255,255,255,0.08)';
+    b.style.color = '#fff';
+  });
+  if (btn) {
+    btn.style.background = '#00f0ff';
+    btn.style.color = '#000';
+  }
+  const box = document.querySelector('.player__box');
+  if (box) {
+    box.innerHTML = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#00f0ff;font-size:16px;background:#000;">⚡ Đang tách luồng sạch .m3u8 từ 123Embed...</div>';
+  }
+  const res = await resolve123EmbedData(tmdbId);
+  if (!res.failed && res.url) {
+    playStream(res.url, resumeTime, res);
+  } else if (box) {
+    box.innerHTML = `<iframe src="${res.embedUrl}" sandbox="allow-scripts allow-same-origin allow-presentation" style="position:absolute;inset:0;width:100%;height:100%;border:none;" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>`;
+  }
+};
+
 function renderEpisodeButtonsHtml(episodes, activeIdx) {
   return '<div style="margin-top:20px;">' +
     '<h3 style="color:#fff;font-size:16px;margin-bottom:10px;">Danh Sách Tập (' + episodes.length + ' tập):</h3>' +
@@ -1243,7 +1330,11 @@ async function renderWatchPage(slug) {
     const s = servers[idx];
     const bg = idx === 0 ? '#00f0ff' : 'rgba(255,255,255,0.08)';
     const col = idx === 0 ? '#000' : '#fff';
-    serverBtns += `<button type="button" style="padding:10px 18px;background:${bg};color:${col};border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:0.2s;" onclick="switchServer(${idx}, this)">▶ ${s.server_name.replace(/[\r\n\t]+/g, ' ').trim()}</button> `;
+    serverBtns += `<button type="button" data-vsmov-srv="${idx}" style="padding:10px 18px;background:${bg};color:${col};border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:0.2s;" onclick="switchServer(${idx}, this)">▶ ${s.server_name.replace(/[\r\n\t]+/g, ' ').trim()}</button> `;
+  }
+
+  if (showIntl && !isSeries && tmdbId) {
+    serverBtns += `<button type="button" id="btn123Embed" style="padding:10px 18px;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:0.2s;" onclick="play123EmbedM3u8('${tmdbId}', this)">⚡ 123Embed (.m3u8 Sạch)</button> `;
   }
 
   if (intlEmbed) {
@@ -1285,6 +1376,55 @@ async function renderWatchPage(slug) {
       ${epHtml}
     </div>
   `;
+
+  // Phim lẻ quốc tế có TMDB ID: kiểm tra nhanh node VSMov (4.5s hoặc từ cache 3 phút); nếu node VSMov đang nghẽn -> dùng 123Embed (.m3u8 sạch) làm chính, VSMov làm phụ
+  const vsmovHostMatch = streamUrl.match(/^https:\/\/(v\d+\.streamvsmov\.com)\//);
+  if (showIntl && !isSeries && tmdbId && vsmovHostMatch) {
+    const hostKey = vsmovHostMatch[1];
+    const cached = vsmovNodeHealthCache[hostKey];
+    const isFresh = cached && (Date.now() - cached.ts < 180000);
+    const box = document.querySelector('.player__box');
+    const vsmovBtn = document.querySelector('[data-vsmov-srv="0"]');
+    const btn123 = document.getElementById('btn123Embed');
+
+    const promote123Primary = (e123Res) => {
+      if (vsmovBtn) {
+        vsmovBtn.style.background = 'rgba(255,255,255,0.08)';
+        vsmovBtn.style.color = '#fff';
+        if (!vsmovBtn.textContent.includes('Đang nghẽn')) {
+          vsmovBtn.textContent += ' (Phụ - VSMov nghẽn)';
+        }
+      }
+      if (btn123) {
+        btn123.style.background = '#00f0ff';
+        btn123.style.color = '#000';
+      }
+      playStream(e123Res.url, resumeSeekTime, e123Res);
+    };
+
+    if (isFresh && cached.status === 'congested') {
+      if (box) box.innerHTML = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#00f0ff;font-size:16px;background:#000;">⚡ Node ' + hostKey.split('.')[0] + ' đang nghẽn, đang nạp 123Embed (.m3u8 sạch)...</div>';
+      const e123 = await resolve123EmbedData(tmdbId);
+      if (!e123.failed && e123.url) {
+        promote123Primary(e123);
+        return;
+      }
+    } else if (!isFresh || cached.status !== 'ok') {
+      if (box) box.innerHTML = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#00f0ff;font-size:16px;background:#000;">⚡ Đang kiểm tra node ' + hostKey.split('.')[0] + ' & chuẩn bị nguồn sạch...</div>';
+      const [vRes, e123] = await Promise.all([
+        resolveVsmovData(streamUrl, 4500),
+        resolve123EmbedData(tmdbId)
+      ]);
+      if (!vRes.failed) {
+        playStream(streamUrl, resumeSeekTime, vRes);
+        return;
+      }
+      if (!e123.failed && e123.url) {
+        promote123Primary(e123);
+        return;
+      }
+    }
+  }
 
   playStream(streamUrl, resumeSeekTime);
 }
