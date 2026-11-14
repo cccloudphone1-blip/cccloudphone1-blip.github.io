@@ -293,7 +293,16 @@ async function resolve123EmbedData(tmdbId) {
         const m3u8 = srcs.find(s => s && s.file && s.file.includes('.m3u8'));
         if (m3u8) return { url: m3u8.file, streamType: 'm3u8', tracks: rawTracks, priority: 1 };
         const mp4 = srcs.find(s => s && s.file && (s.type === 'video/mp4' || s.file.includes('/videoplayback') || /\.mp4(\?|$)/i.test(s.file)));
-        if (mp4) return { url: mp4.file, streamType: 'mp4', tracks: rawTracks, priority: 2 };
+        if (mp4) {
+          // Kiểm tra trước tránh Google Drive proxy hết quota (403 downloadQuotaExceeded -> ERR_BLOCKED_BY_ORB)
+          try {
+            const pResp = await fetch(mp4.file, { headers: { Range: 'bytes=65536-65537' }, signal: controller.signal });
+            const pType = (pResp.headers.get('content-type') || '').toLowerCase();
+            if ((pResp.status === 206 || pResp.ok) && pType.startsWith('video/')) {
+              return { url: mp4.file, streamType: 'mp4', tracks: rawTracks, priority: 2 };
+            }
+          } catch (e) {}
+        }
         return null;
       } catch (e) {
         return null;
