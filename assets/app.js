@@ -47,6 +47,21 @@ async function resolveVsmovData(rawUrl) {
   return { url: rawUrl, subtitles: [] };
 }
 
+async function createCleanVttBlobUrl(vttUrl) {
+  try {
+    const resp = await fetch(vttUrl);
+    if (!resp.ok) return vttUrl;
+    let text = await resp.text();
+    if (!text.trimStart().startsWith('WEBVTT')) {
+      text = 'WEBVTT\n\n' + text;
+    }
+    text = text.replace(/(\d{1,2}:\d{2}(?::\d{2})?),(\d{3})/g, '$1.$2');
+    return URL.createObjectURL(new Blob([text], { type: 'text/vtt;charset=utf-8' }));
+  } catch (e) {
+    return vttUrl;
+  }
+}
+
 window.playStream = async function(url) {
   const box = document.querySelector('.player__box');
   if (!box || !url) return;
@@ -69,15 +84,23 @@ window.playStream = async function(url) {
       subtitles = resolved.subtitles;
     }
 
+    const blobSubs = await Promise.all(
+      subtitles.map(async sub => ({
+        ...sub,
+        blobSrc: await createCleanVttBlobUrl(sub.src)
+      }))
+    );
+    if (seq !== currentPlaySeq) return;
+
     const video = document.getElementById('cinema-video');
     if (!video) return;
 
-    subtitles.forEach((sub, idx) => {
+    blobSubs.forEach((sub, idx) => {
       const track = document.createElement('track');
       track.kind = 'subtitles';
       track.label = sub.label;
       track.srclang = sub.code === 'vie' ? 'vi' : 'en';
-      track.src = sub.src;
+      track.src = sub.blobSrc;
       if (sub.code === 'vie' || idx === 0) {
         track.default = true;
       }
