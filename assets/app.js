@@ -172,16 +172,16 @@ function showAutoNextCountdown(nextEp, nextEpIdx) {
 // ==========================================
 async function resolveVsmovData(rawUrl) {
   const m = rawUrl.match(/^https:\/\/(v\d+\.streamvsmov\.com)\/stream\/([a-zA-Z0-9-]+)\/master\.m3u8/);
-  if (!m) return { url: rawUrl, subtitles: [], failed: false };
+  if (!m) return { url: rawUrl, embedUrl: '', subtitles: [], failed: false, reason: '' };
   const host = 'https://' + m[1];
+  const embedUrl = host + '/video/' + m[2];
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 7000);
+  const timer = setTimeout(() => controller.abort(), 18000);
   try {
-    const embedUrl = host + '/video/' + m[2];
     const workerUrl = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(embedUrl);
     const resp = await fetch(workerUrl, { signal: controller.signal });
     clearTimeout(timer);
-    if (!resp.ok) return { url: rawUrl, subtitles: [], failed: true };
+    if (!resp.ok) return { url: rawUrl, embedUrl, subtitles: [], failed: true, reason: 'HTTP ' + resp.status };
     const html = await resp.text();
 
     let resolvedUrl = rawUrl;
@@ -189,7 +189,7 @@ async function resolveVsmovData(rawUrl) {
     if (sigMatch && sigMatch[1]) {
       resolvedUrl = sigMatch[1];
     } else {
-      return { url: rawUrl, subtitles: [], failed: true };
+      return { url: rawUrl, embedUrl, subtitles: [], failed: true, reason: 'Không tìm thấy chữ ký luồng' };
     }
 
     let subs = [];
@@ -219,16 +219,20 @@ async function resolveVsmovData(rawUrl) {
       } catch (pe) {}
     }
 
-    return { url: resolvedUrl, subtitles: subs, failed: false };
+    return { url: resolvedUrl, embedUrl, subtitles: subs, failed: false, reason: '' };
   } catch (e) {
     clearTimeout(timer);
-    return { url: rawUrl, subtitles: [], failed: true };
+    const reason = (e && e.name === 'AbortError') ? 'Hết thời gian chờ (18s)' : 'Lỗi kết nối';
+    return { url: rawUrl, embedUrl, subtitles: [], failed: true, reason };
   }
 }
 
 async function createCleanVttBlobUrl(vttUrl) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const resp = await fetch(vttUrl);
+    const resp = await fetch(vttUrl, { signal: controller.signal });
+    clearTimeout(timer);
     if (!resp.ok) return vttUrl;
     let text = await resp.text();
     if (!text.trimStart().startsWith('WEBVTT')) {
@@ -237,6 +241,7 @@ async function createCleanVttBlobUrl(vttUrl) {
     text = text.replace(/(\d{1,2}:\d{2}(?::\d{2})?),(\d{3})/g, '$1.$2');
     return URL.createObjectURL(new Blob([text], { type: 'text/vtt;charset=utf-8' }));
   } catch (e) {
+    clearTimeout(timer);
     return vttUrl;
   }
 }
@@ -255,69 +260,112 @@ function clearStallWatchdog() {
 
 let kkphimFallbackFetchedForSlug = null;
 
-async function tryFallbackToNextServer(reasonText) {
-  if (!currentMovieContext || !currentMovieContext.servers) return false;
-  let nextServerIdx = (currentMovieContext.currentServerIdx || 0) + 1;
-
-  // Nếu đã hết server trong bucket, thử lấy thêm nguồn dự phòng trực tiếp từ KKPhim (CORS public)
-  if (nextServerIdx >= currentMovieContext.servers.length && kkphimFallbackFetchedForSlug !== currentMovieContext.slug) {
-    kkphimFallbackFetchedForSlug = currentMovieContext.slug;
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 15000);
-      const res = await fetch('https://phimapi.com/phim/' + encodeURIComponent(currentMovieContext.slug), { signal: ctrl.signal });
-      clearTimeout(t);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.status && Array.isArray(data.episodes) && data.episodes.length > 0) {
-          const newServers = data.episodes
-            .filter(s => s && Array.isArray(s.server_data) && s.server_data.length > 0)
-            .map(s => ({
-              ...s,
-              // Nguồn KKPhim (.m3u8 từ phim1280/kvp) thường chặn CORS khi gọi XHR từ domain ngoài -> ưu tiên link_embed nếu có
-              server_data: s.server_data.map(ep => ({
-                ...ep,
-                link_m3u8: ep.link_embed ? '' : ep.link_m3u8
-              }))
-            }));
-          if (newServers.length > 0) {
-            const listEl = document.querySelector('.server-list');
-            newServers.forEach(ns => {
-              const newIdx = currentMovieContext.servers.length;
-              currentMovieContext.servers.push(ns);
-              if (listEl) {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.style.cssText = 'padding:10px 18px;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:0.2s;';
-                btn.textContent = '▶ Dự phòng (' + (ns.server_name || 'VIP').replace(/[\r\n\t]+/g, ' ').trim() + ')';
-                btn.onclick = function() { switchServer(newIdx, btn); };
-                listEl.appendChild(btn);
-              }
-            });
+/** Nạp thủ công thêm server dự phòng vào danh sách chọn máy chủ (không tự động chuyển khỏi VSMov). */
+async function loadManualBackupServers(btnEl) {
+  if (!currentMovieContext || !currentMovieContext.servers) return;
+  if (kkphimFallbackFetchedForSlug === currentMovieContext.slug) {
+    if (btnEl) btnEl.textContent = '✅ Đã nạp bên dưới';
+    return;
+  }
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = '⏳ Đang tìm...';
+  }
+  kkphimFallbackFetchedForSlug = currentMovieContext.slug;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 12000);
+    const res = await fetch('https://phimapi.com/phim/' + encodeURIComponent(currentMovieContext.slug), { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const listEl = document.querySelector('.server-list');
+    let added = 0;
+    if (data && data.status && Array.isArray(data.episodes)) {
+      data.episodes
+        .filter(s => s && Array.isArray(s.server_data) && s.server_data.length > 0)
+        .forEach(s => {
+          const ns = {
+            ...s,
+            server_data: s.server_data.map(ep => ({
+              ...ep,
+              link_m3u8: ep.link_embed ? '' : ep.link_m3u8
+            }))
+          };
+          const newIdx = currentMovieContext.servers.length;
+          currentMovieContext.servers.push(ns);
+          added++;
+          if (listEl) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.style.cssText = 'padding:10px 18px;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;transition:0.2s;';
+            btn.textContent = '▶ Dự phòng (' + (ns.server_name || 'VIP').replace(/[\r\n\t]+/g, ' ').trim() + ')';
+            btn.onclick = function() {
+              const epIdx = currentMovieContext.currentEpIdx || 0;
+              switchServer(newIdx, btn, epIdx, 0);
+            };
+            listEl.appendChild(btn);
           }
-        }
-      }
-    } catch (e) {
-      console.warn('[Fallback API error]', e);
+        });
+    }
+    if (btnEl) {
+      btnEl.textContent = added > 0 ? `✅ Đã thêm ${added} nguồn bên dưới` : '❌ Không tìm thấy nguồn dự phòng';
+    }
+  } catch (e) {
+    kkphimFallbackFetchedForSlug = null;
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = '📺 Thử nạp lại nguồn dự phòng';
     }
   }
+}
 
-  if (nextServerIdx >= currentMovieContext.servers.length) return false;
+/** Hiển thị bảng điều khiển giữ nguyên VSMov khi node streamvsmov phản hồi chậm/quá tải. */
+function showVsmovRecoveryPanel(box, rawUrl, embedUrl, initialSeekTime, reasonText) {
+  box.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:radial-gradient(circle at center,#131b2b 0%,#080b10 100%);color:#fff;font-family:sans-serif;';
 
-  const epIdx = currentMovieContext.currentEpIdx || 0;
-  const resumeSec = (currentArtInstance && currentArtInstance.currentTime > 2) ? currentArtInstance.currentTime : 0;
-  const serverBtns = document.querySelectorAll('.server-list button');
-  const nextBtn = serverBtns[nextServerIdx] || null;
+  const title = document.createElement('div');
+  title.style.cssText = 'font-size:17px;font-weight:700;color:#fbbf24;';
+  title.textContent = `⚠️ Máy chủ VSMov đang nghẽn (${reasonText || 'Timeout'})`;
 
-  console.warn('[SmartFallback]', reasonText, '-> Switching to server', nextServerIdx);
-  switchServer(nextServerIdx, nextBtn, epIdx, resumeSec);
+  const desc = document.createElement('div');
+  desc.style.cssText = 'font-size:13px;color:#94a3b8;max-width:480px;line-height:1.5;';
+  desc.textContent = 'Hệ thống vẫn giữ nguyên nguồn chính VSMov theo ưu tiên của bạn. Bạn có thể thử kết nối lại hoặc mở trực tiếp khung phát VSMov gốc.';
 
-  setTimeout(() => {
-    if (currentArtInstance && currentArtInstance.notice) {
-      currentArtInstance.notice.show = reasonText || '⚡ Đã tự động chuyển sang máy chủ dự phòng mượt hơn!';
-    }
-  }, 600);
-  return true;
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:4px;';
+
+  const retryBtn = document.createElement('button');
+  retryBtn.type = 'button';
+  retryBtn.style.cssText = 'padding:10px 18px;background:#00f0ff;color:#000;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;';
+  retryBtn.textContent = '🔄 Thử kết nối lại VSMov';
+  retryBtn.onclick = () => window.playStream(rawUrl, initialSeekTime);
+  actions.appendChild(retryBtn);
+
+  if (embedUrl && /^https:\/\/v\d+\.streamvsmov\.com\/video\/[a-zA-Z0-9-]+$/.test(embedUrl)) {
+    const embedBtn = document.createElement('button');
+    embedBtn.type = 'button';
+    embedBtn.style.cssText = 'padding:10px 18px;background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
+    embedBtn.textContent = '🎬 Mở khung phát VSMov gốc';
+    embedBtn.onclick = () => {
+      box.innerHTML = `<iframe src="${embedUrl}" style="position:absolute;inset:0;width:100%;height:100%;border:none;" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>`;
+    };
+    actions.appendChild(embedBtn);
+  }
+
+  const backupBtn = document.createElement('button');
+  backupBtn.type = 'button';
+  backupBtn.style.cssText = 'padding:10px 16px;background:rgba(255,255,255,0.05);color:#cbd5e1;border:1px solid rgba(255,255,255,0.12);border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
+  backupBtn.textContent = '📺 Hiện server dự phòng (nếu cần)';
+  backupBtn.onclick = () => loadManualBackupServers(backupBtn);
+  actions.appendChild(backupBtn);
+
+  wrap.appendChild(title);
+  wrap.appendChild(desc);
+  wrap.appendChild(actions);
+  box.appendChild(wrap);
 }
 
 window.playStream = async function(url, initialSeekTime = 0) {
@@ -329,6 +377,9 @@ window.playStream = async function(url, initialSeekTime = 0) {
   clearStallWatchdog();
 
   if (currentArtInstance) {
+    if (Array.isArray(currentArtInstance._subBlobUrls)) {
+      currentArtInstance._subBlobUrls.forEach(bu => { try { URL.revokeObjectURL(bu); } catch (e) {} });
+    }
     try { currentArtInstance.destroy(false); } catch (e) {}
     currentArtInstance = null;
   }
@@ -339,16 +390,24 @@ window.playStream = async function(url, initialSeekTime = 0) {
 
   const isDirectM3u8 = url.includes('.m3u8') && !url.includes('player.phimapi.com/player') && !url.includes('/embed/');
   if (isDirectM3u8) {
-    box.innerHTML = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#00f0ff;font-size:16px;background:#000;">⚡ Đang kết nối luồng phát sạch...</div>';
+    box.innerHTML = '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#00f0ff;font-size:16px;background:#000;padding:20px;text-align:center;"><div>⚡ Đang kết nối máy chủ VSMov...</div><div id="vsmovLoadHint" style="font-size:12px;color:#8b94a7;"></div></div>';
 
     let finalUrl = url;
     let subtitles = [];
     if (url.includes('streamvsmov.com/stream/') && !url.includes('signature=')) {
+      const slowHintTimer = setTimeout(() => {
+        if (seq !== currentPlaySeq) return;
+        const hint = document.getElementById('vsmovLoadHint');
+        if (hint) hint.textContent = '⏳ VSMov đang phản hồi chậm vào giờ cao điểm, vẫn đang giữ kết nối chính...';
+      }, 5000);
+
       const resolved = await resolveVsmovData(url);
+      clearTimeout(slowHintTimer);
       if (seq !== currentPlaySeq) return;
+
       if (resolved.failed) {
-        const switched = await tryFallbackToNextServer('⚠️ Máy chủ chính phản hồi chậm, tự động chuyển nguồn dự phòng...');
-        if (switched) return;
+        showVsmovRecoveryPanel(box, url, resolved.embedUrl, initialSeekTime, resolved.reason);
+        return;
       }
       finalUrl = resolved.url;
       subtitles = resolved.subtitles;
@@ -356,18 +415,6 @@ window.playStream = async function(url, initialSeekTime = 0) {
 
     if (seq !== currentPlaySeq) return;
     box.innerHTML = '';
-
-    // Chuẩn bị phụ đề blob
-    let subTracks = [];
-    if (subtitles && subtitles.length > 0) {
-      subTracks = await Promise.all(subtitles.map(async s => ({
-        code: s.code,
-        label: s.label || (s.code === 'vie' ? 'Tiếng Việt' : 'English'),
-        url: await createCleanVttBlobUrl(s.src)
-      })));
-    }
-
-    const defaultSub = subTracks.find(s => s.code === 'vie') || subTracks[0];
 
     try {
       const art = new Artplayer({
@@ -459,13 +506,13 @@ window.playStream = async function(url, initialSeekTime = 0) {
               });
 
               let fatalRetryCount = 0;
-              hls.on(Hls.Events.ERROR, async function(evt, data) {
+              hls.on(Hls.Events.ERROR, function(evt, data) {
                 // Xử lý non-fatal BUFFER_STALLED_ERROR (bị kẹt micro-gap gây quay tròn)
                 if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || data.details === 'bufferStalledError') {
                   if (video.buffered && video.buffered.length > 0) {
                     for (let i = 0; i < video.buffered.length; i++) {
                       const bStart = video.buffered.start(i);
-                      if (bStart > video.currentTime && bStart - video.currentTime < 1.5) {
+                      if (bStart > video.currentTime && bStart - video.currentTime < 2.0) {
                         video.currentTime = bStart + 0.05;
                         break;
                       }
@@ -477,52 +524,50 @@ window.playStream = async function(url, initialSeekTime = 0) {
 
                 if (data.fatal) {
                   fatalRetryCount++;
-                  if (fatalRetryCount >= 3) {
-                    if (await tryFallbackToNextServer('⚠️ Máy chủ bị nghẽn, đang tự chuyển máy chủ dự phòng...')) {
-                      return;
-                    }
-                  }
                   if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                    hls.startLoad();
+                    if (fatalRetryCount <= 6) {
+                      artInst.notice.show = `⏳ Luồng VSMov tạm gián đoạn, đang thử nối lại (${fatalRetryCount}/6)...`;
+                      setTimeout(() => {
+                        if (seq === currentPlaySeq && artInst.hls === hls) hls.startLoad();
+                      }, Math.min(fatalRetryCount * 800, 3000));
+                    } else {
+                      artInst.notice.show = '⚠️ Kết nối tới VSMov đang nghẽn. Bấm phát lại hoặc tải lại trang nếu cần.';
+                    }
                   } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                     hls.recoverMediaError();
                   }
                 }
               });
 
-              // Watchdog chống kẹt quay tròn kéo dài
+              // Watchdog chống kẹt quay tròn kéo dài (giữ nguyên VSMov, không tự ý đổi server khác)
               let lastTrackedTime = -1;
               let stallSeconds = 0;
               clearStallWatchdog();
-              activeStallWatchdog = setInterval(async () => {
+              activeStallWatchdog = setInterval(() => {
                 if (seq !== currentPlaySeq || !video || video.paused || video.ended) {
                   stallSeconds = 0;
                   return;
                 }
                 if (video.readyState < 3 && Math.abs(video.currentTime - lastTrackedTime) < 0.05) {
                   stallSeconds++;
-                  // Sau 2s đứng hình: thử nhích nhẹ qua khe rỗng và kích tải lại
+                  // Sau 2s đứng hình: chỉ nhảy khi có vùng buffer sẵn phía trước và kích tải lại
                   if (stallSeconds === 2) {
                     hls.startLoad();
                     if (video.buffered && video.buffered.length > 0) {
                       for (let i = 0; i < video.buffered.length; i++) {
-                        if (video.buffered.start(i) > video.currentTime && video.buffered.start(i) - video.currentTime < 1.5) {
-                          video.currentTime = video.buffered.start(i) + 0.05;
+                        const bStart = video.buffered.start(i);
+                        if (bStart > video.currentTime && bStart - video.currentTime < 2.0) {
+                          video.currentTime = bStart + 0.05;
                           break;
                         }
                       }
-                    } else if (video.currentTime > 0) {
-                      video.currentTime += 0.1;
                     }
                   }
-                  // Sau 7s vẫn quay tròn không thoát: tự động chuyển sang server dự phòng (nếu có)
-                  if (stallSeconds >= 7) {
+                  // Sau 10s đứng hình: thông báo nhẹ và kích tải lại trên chính VSMov
+                  if (stallSeconds >= 10) {
                     stallSeconds = 0;
-                    const ok = await tryFallbackToNextServer('⚠️ Luồng phát đang chậm, tự động đổi máy chủ dự phòng...');
-                    if (!ok) {
-                      artInst.notice.show = '⚠️ Mạng tới máy chủ phim đang chậm, bạn thử tải lại hoặc đổi tập/máy chủ khác!';
-                      hls.startLoad();
-                    }
+                    artInst.notice.show = '⏳ Máy chủ VSMov đang tải chậm (giờ cao điểm), vẫn đang giữ kết nối chính...';
+                    hls.startLoad();
                   }
                 } else {
                   stallSeconds = 0;
@@ -534,8 +579,8 @@ window.playStream = async function(url, initialSeekTime = 0) {
             }
           }
         },
-        subtitle: defaultSub ? {
-          url: defaultSub.url,
+        subtitle: {
+          url: '',
           type: 'vtt',
           style: {
             color: '#ffffff',
@@ -549,35 +594,63 @@ window.playStream = async function(url, initialSeekTime = 0) {
             textShadow: '0 2px 4px rgba(0,0,0,0.95)',
             bottom: '36px'
           }
-        } : { url: '', type: 'vtt' },
-        settings: subTracks.length > 0 ? [
-          {
-            html: 'Phụ đề',
-            width: 220,
-            tooltip: defaultSub ? defaultSub.label : 'Tắt',
-            selector: [
-              { default: !defaultSub, html: 'Tắt phụ đề', url: '' },
-              ...subTracks.map(st => ({
-                default: defaultSub && defaultSub.code === st.code,
-                html: st.label,
-                url: st.url
-              }))
-            ],
-            onSelect: function(item) {
-              if (item.url) {
-                art.subtitle.show = true;
-                art.subtitle.switch(item.url, { name: item.html });
-              } else {
-                art.subtitle.show = false;
-              }
-              updateSubButtons(item.url);
-              return item.html;
-            }
-          }
-        ] : []
+        },
+        settings: []
       });
 
       currentArtInstance = art;
+
+      // Nạp phụ đề bất đồng bộ sau khi video đã khởi tạo (không chặn luồng phát)
+      if (subtitles && subtitles.length > 0) {
+        (async function loadSubtitlesAsync() {
+          const subTracks = await Promise.all(subtitles.map(async s => ({
+            code: s.code,
+            label: s.label || (s.code === 'vie' ? 'Tiếng Việt' : (s.code === 'zho' ? 'Tiếng Trung' : 'English')),
+            url: await createCleanVttBlobUrl(s.src)
+          })));
+          if (seq !== currentPlaySeq || currentArtInstance !== art) return;
+
+          art._subBlobUrls = subTracks
+            .map(t => t.url)
+            .filter(u => typeof u === 'string' && u.startsWith('blob:'));
+
+          const defaultSub = subTracks.find(s => s.code === 'vie') || subTracks[0];
+          if (defaultSub && defaultSub.url) {
+            try {
+              art.subtitle.show = true;
+              art.subtitle.switch(defaultSub.url, { name: defaultSub.label });
+            } catch (se) {}
+          }
+
+          try {
+            art.setting.add({
+              html: 'Phụ đề',
+              width: 220,
+              tooltip: defaultSub ? defaultSub.label : 'Tắt',
+              selector: [
+                { default: !defaultSub, html: 'Tắt phụ đề', url: '' },
+                ...subTracks.map(st => ({
+                  default: defaultSub && defaultSub.code === st.code,
+                  html: st.label,
+                  url: st.url
+                }))
+              ],
+              onSelect: function(item) {
+                if (item.url) {
+                  art.subtitle.show = true;
+                  art.subtitle.switch(item.url, { name: item.html });
+                } else {
+                  art.subtitle.show = false;
+                }
+                updateSubButtons(item.url);
+                return item.html;
+              }
+            });
+          } catch (se) {}
+
+          renderSubtitleButtons(box, subTracks, defaultSub);
+        })();
+      }
 
       // Xử lý Resume Playback
       art.on('ready', () => {
@@ -633,11 +706,6 @@ window.playStream = async function(url, initialSeekTime = 0) {
         }
       });
 
-      // Render thanh chuyển phụ đề trực tiếp dưới Player
-      if (subTracks.length > 0) {
-        renderSubtitleButtons(box, subTracks, defaultSub);
-      }
-
     } catch (err) {
       console.error('Artplayer init error:', err);
       // Fallback native video nếu cần
@@ -669,23 +737,38 @@ function showResumeToast(time) {
 
 function renderSubtitleButtons(box, subTracks, activeSub) {
   const container = box.parentElement;
-  if (!container) return;
+  if (!container || !subTracks || subTracks.length === 0) return;
+
+  const existing = document.getElementById('subSwitcherBar');
+  if (existing) existing.remove();
 
   const bar = document.createElement('div');
   bar.id = 'subSwitcherBar';
   bar.style.cssText = 'margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(255,255,255,0.03);padding:8px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);';
 
-  let btns = `<span style="color:#8b94a7;font-size:13px;font-weight:600;">💬 Phụ đề:</span>`;
+  const labelEl = document.createElement('span');
+  labelEl.style.cssText = 'color:#8b94a7;font-size:13px;font-weight:600;';
+  labelEl.textContent = '💬 Phụ đề:';
+  bar.appendChild(labelEl);
 
-  btns += `<button type="button" class="sub-btn" data-url="" onclick="switchSubManual('', this)" style="padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;border:1px solid rgba(255,255,255,0.1);${!activeSub ? 'background:#00f0ff;color:#000;' : 'background:rgba(255,255,255,0.08);color:#fff;'}">Tắt</button>`;
+  const makeBtn = (text, url, isActive) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sub-btn';
+    btn.setAttribute('data-url', url || '');
+    btn.style.cssText = `padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;border:1px solid rgba(255,255,255,0.1);${isActive ? 'background:#00f0ff;color:#000;' : 'background:rgba(255,255,255,0.08);color:#fff;'}`;
+    btn.textContent = text;
+    btn.onclick = () => switchSubManual(url || '', btn);
+    return btn;
+  };
 
+  bar.appendChild(makeBtn('Tắt', '', !activeSub));
   subTracks.forEach(st => {
     const isAct = activeSub && activeSub.code === st.code;
     const flag = st.code === 'vie' ? '🇻🇳 ' : (st.code === 'zho' ? '🇨🇳 ' : (st.code === 'eng' ? '🇬🇧 ' : '🌐 '));
-    btns += `<button type="button" class="sub-btn" data-url="${st.url}" onclick="switchSubManual('${st.url}', this)" style="padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;border:1px solid rgba(255,255,255,0.1);${isAct ? 'background:#00f0ff;color:#000;' : 'background:rgba(255,255,255,0.08);color:#fff;'}">${flag}${st.label}</button>`;
+    bar.appendChild(makeBtn(flag + st.label, st.url, isAct));
   });
 
-  bar.innerHTML = btns;
   box.after(bar);
 }
 
