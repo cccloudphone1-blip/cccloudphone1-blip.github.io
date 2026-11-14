@@ -975,31 +975,37 @@ function shouldShowIntlSource(movie) {
 
   const rawCountry = (movie.country || (movie.countries && movie.countries.map(c => c.name).join(' ')) || '').toLowerCase();
   const rawCat = (movie.category || (movie.categories && movie.categories.map(c => c.name).join(' ')) || '').toLowerCase();
-  const rawName = ((movie.name || '') + ' ' + (movie.origin_name || '') + ' ' + (movie.slug || '')).toLowerCase();
+  const originName = String(movie.origin_name || '').trim();
+  const rawName = ((movie.name || '') + ' ' + originName + ' ' + (movie.slug || '')).toLowerCase();
 
-  // Loại trừ triệt để phim Châu Á / Donghua / Cổ trang
+  // Loại trừ phim Châu Á / Donghua / Cổ trang / Anime
   const asianKeywords = ['trung quốc', 'china', 'hàn quốc', 'korea', 'nhật bản', 'japan', 'thái lan', 'thailand', 'đài loan', 'hong kong', 'việt nam', 'ấn độ', 'india'];
   for (const k of asianKeywords) {
     if (rawCountry.includes(k)) return false;
   }
 
-  const asianGenres = ['hoạt hình', 'anime', 'cổ trang', 'tiên hiệp', 'kiếm hiệp', 'đam mỹ', 'huyền huyễn', 'xuyên không'];
+  const asianGenres = ['anime', 'cổ trang', 'tiên hiệp', 'kiếm hiệp', 'đam mỹ', 'huyền huyễn', 'xuyên không'];
   for (const g of asianGenres) {
     if (rawCat.includes(g)) return false;
   }
 
-  const asianSlugs = ['tien-nghich', 'kiem-lai', 'dau-pha', 'dau-la', 'the-gioi-hoan-my', 'than-lan-chi-vuc', 'thon-phe-tinh-khong'];
+  const asianSlugs = ['tien-nghich', 'kiem-lai', 'dau-pha', 'dau-la', 'the-gioi-hoan-my', 'than-lan-chi-vuc', 'thon-phe-tinh-khong', 'pham-nhan-tu-tien', 'nhat-niem-vinh-hang', 'tru-tien', 'doraemon', 'conan', 'naruto', 'one-piece'];
   for (const as of asianSlugs) {
     if (rawName.includes(as)) return false;
   }
 
-  // Chỉ cho phép nếu rõ ràng thuộc Âu Mỹ / Hollywood
   const westernKeywords = ['âu mỹ', 'mỹ', 'united states', 'usa', 'anh', 'united kingdom', 'uk', 'pháp', 'france', 'đức', 'germany', 'canada', 'úc', 'australia', 'tây ban nha', 'spain', 'ý', 'italy'];
   for (const w of westernKeywords) {
     if (rawCountry.includes(w)) return true;
   }
 
-  // Nếu không có thông tin quốc gia rõ ràng, an toàn nhất là ẩn để tránh 404 MEDIA NOT FOUND
+  // Bucket JSON không lưu country/category -> nhận diện phim Âu Mỹ qua origin_name tiếng Anh/Latin (không CJK, không dấu tiếng Việt)
+  if (!rawCountry && originName && /[a-zA-Z]{2,}/.test(originName)) {
+    const hasCJKorHangul = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(originName);
+    const hasViDiacritics = /[àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/i.test(originName);
+    if (!hasCJKorHangul && !hasViDiacritics) return true;
+  }
+
   return false;
 }
 
