@@ -201,6 +201,7 @@ function normalizeSubtitleList(parsed, baseHost) {
       return { code: meta.norm, order: meta.order, label: meta.label, src };
     })
     .filter(s => {
+      if (s.order > 3) return false;
       const key = s.code + '|' + s.label;
       if (seen.has(key)) return false;
       seen.add(key);
@@ -257,12 +258,47 @@ async function resolveVsmovData(rawUrl, timeoutMs = 18000) {
   }
 }
 
-/** Tách luồng .m3u8 hoặc .mp4 trực tiếp và phụ đề .srt sạch (không quảng cáo) từ 123Embed theo TMDB ID phim lẻ. */
+let e123MapCache = null;
+async function get123EmbedMap() {
+  if (e123MapCache) return e123MapCache;
+  try {
+    const r = await fetch('/data/123embed_m3u8_map.json');
+    if (r.ok) {
+      e123MapCache = await r.json();
+      return e123MapCache;
+    }
+  } catch (e) {}
+  e123MapCache = {};
+  return e123MapCache;
+}
+
+/** Tách luồng .m3u8 trực tiếp và phụ đề .srt sạch (Việt/Trung/Anh, không quảng cáo) từ 123Embed theo TMDB ID phim lẻ. */
 async function resolve123EmbedData(tmdbId) {
   const embedPage = 'https://play.123embed.net/mv/' + encodeURIComponent(tmdbId);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 14000);
   try {
+    const map = await get123EmbedMap();
+    const mapped = map && map[String(tmdbId)];
+    if (mapped && mapped.id && mapped.srv) {
+      try {
+        const ajaxUrl = `https://play.123embed.net/ajax/movie/get_sources/${mapped.id}/${mapped.srv}`;
+        const wFast = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(ajaxUrl);
+        const rFast = await fetch(wFast, { signal: controller.signal });
+        if (rFast.ok) {
+          const dFast = await rFast.json();
+          const srcsFast = typeof dFast.sources === 'string' ? JSON.parse(dFast.sources) : (Array.isArray(dFast.sources) ? dFast.sources : []);
+          const m3u8Fast = Array.isArray(srcsFast) ? srcsFast.find(s => s && s.file && s.file.includes('.m3u8')) : null;
+          if (m3u8Fast) {
+            clearTimeout(timer);
+            const rawTracksFast = typeof dFast.tracks === 'string' ? JSON.parse(dFast.tracks) : (Array.isArray(dFast.tracks) ? dFast.tracks : []);
+            const subsFast = normalizeSubtitleList(rawTracksFast, 'https://subtitle.123embed.net');
+            return { url: m3u8Fast.file, streamType: 'm3u8', embedUrl: embedPage, subtitles: subsFast, failed: false };
+          }
+        }
+      } catch (e) {}
+    }
+
     const w1 = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(embedPage);
     const r1 = await fetch(w1, { signal: controller.signal });
     if (!r1.ok) { clearTimeout(timer); return { failed: true, embedUrl: embedPage }; }
@@ -1425,6 +1461,9 @@ async function renderWatchPage(slug) {
       if (btn123) {
         btn123.style.background = '#00f0ff';
         btn123.style.color = '#000';
+        if (vsmovBtn && vsmovBtn.parentElement) {
+          vsmovBtn.parentElement.prepend(btn123);
+        }
       }
       playStream(e123Res.url, resumeSeekTime, e123Res);
     };
