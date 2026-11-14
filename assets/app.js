@@ -337,7 +337,8 @@ window.playStream = async function(url, initialSeekTime = 0) {
   const oldSubBar = document.getElementById('subSwitcherBar');
   if (oldSubBar) oldSubBar.remove();
 
-  if (url.includes('.m3u8')) {
+  const isDirectM3u8 = url.includes('.m3u8') && !url.includes('player.phimapi.com/player') && !url.includes('/embed/');
+  if (isDirectM3u8) {
     box.innerHTML = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#00f0ff;font-size:16px;background:#000;">⚡ Đang kết nối luồng phát sạch...</div>';
 
     let finalUrl = url;
