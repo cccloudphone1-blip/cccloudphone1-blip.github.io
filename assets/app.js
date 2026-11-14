@@ -257,35 +257,55 @@ async function resolveVsmovData(rawUrl, timeoutMs = 18000) {
   }
 }
 
-/** Tách luồng .m3u8 và phụ đề .srt sạch (không quảng cáo) từ 123Embed theo TMDB ID phim lẻ. */
+/** Tách luồng .m3u8 hoặc .mp4 trực tiếp và phụ đề .srt sạch (không quảng cáo) từ 123Embed theo TMDB ID phim lẻ. */
 async function resolve123EmbedData(tmdbId) {
   const embedPage = 'https://play.123embed.net/mv/' + encodeURIComponent(tmdbId);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), 14000);
   try {
     const w1 = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(embedPage);
     const r1 = await fetch(w1, { signal: controller.signal });
     if (!r1.ok) { clearTimeout(timer); return { failed: true, embedUrl: embedPage }; }
     const html = await r1.text();
-    const srvMatch = html.match(/loadMovieServer\(\s*['"](\d+)['"]\s*,\s*['"]([a-zA-Z0-9_-]+)['"]\s*\)/);
-    if (!srvMatch) { clearTimeout(timer); return { failed: true, embedUrl: embedPage }; }
 
-    const ajaxUrl = `https://play.123embed.net/ajax/movie/get_sources/${srvMatch[1]}/${srvMatch[2]}`;
-    const w2 = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(ajaxUrl);
-    const r2 = await fetch(w2, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!r2.ok) return { failed: true, embedUrl: embedPage };
-
-    const data = await r2.json();
-    const sources = typeof data.sources === 'string' ? JSON.parse(data.sources) : (data.sources || []);
-    const hlsSource = sources.find(s => s && s.file && s.file.includes('.m3u8')) || sources[0];
-    if (!hlsSource || !hlsSource.file || !hlsSource.file.includes('.m3u8')) {
-      return { failed: true, embedUrl: embedPage };
+    const matches = [...html.matchAll(/loadMovieServer\(\s*['"](\d+)['"]\s*,\s*['"]([a-zA-Z0-9_-]+)['"]\s*\)/g)];
+    const seenSrv = new Set();
+    const candidates = [];
+    for (const m of matches) {
+      const id = m[1];
+      const srv = m[2];
+      if (!srv || srv === '2embed' || seenSrv.has(srv)) continue;
+      seenSrv.add(srv);
+      candidates.push({ id, srv });
     }
+    if (candidates.length === 0) { clearTimeout(timer); return { failed: true, embedUrl: embedPage }; }
 
-    const rawTracks = typeof data.tracks === 'string' ? JSON.parse(data.tracks) : (data.tracks || []);
-    const subs = normalizeSubtitleList(rawTracks, 'https://subtitle.123embed.net');
-    return { url: hlsSource.file, embedUrl: embedPage, subtitles: subs, failed: false };
+    const results = await Promise.all(candidates.map(async c => {
+      try {
+        const ajaxUrl = `https://play.123embed.net/ajax/movie/get_sources/${c.id}/${c.srv}`;
+        const w2 = 'https://damp-feather-8471.hoangsv19092009.workers.dev/?url=' + encodeURIComponent(ajaxUrl);
+        const r2 = await fetch(w2, { signal: controller.signal });
+        if (!r2.ok) return null;
+        const data = await r2.json();
+        const srcs = typeof data.sources === 'string' ? JSON.parse(data.sources) : (Array.isArray(data.sources) ? data.sources : []);
+        if (!Array.isArray(srcs) || srcs.length === 0) return null;
+        const rawTracks = typeof data.tracks === 'string' ? JSON.parse(data.tracks) : (Array.isArray(data.tracks) ? data.tracks : []);
+        const m3u8 = srcs.find(s => s && s.file && s.file.includes('.m3u8'));
+        if (m3u8) return { url: m3u8.file, streamType: 'm3u8', tracks: rawTracks, priority: 1 };
+        const mp4 = srcs.find(s => s && s.file && (s.type === 'video/mp4' || s.file.includes('/videoplayback') || /\.mp4(\?|$)/i.test(s.file)));
+        if (mp4) return { url: mp4.file, streamType: 'mp4', tracks: rawTracks, priority: 2 };
+        return null;
+      } catch (e) {
+        return null;
+      }
+    }));
+    clearTimeout(timer);
+
+    const valid = results.filter(Boolean).sort((a, b) => a.priority - b.priority);
+    if (valid.length === 0) return { failed: true, embedUrl: embedPage };
+    const picked = valid[0];
+    const subs = normalizeSubtitleList(picked.tracks, 'https://subtitle.123embed.net');
+    return { url: picked.url, streamType: picked.streamType, embedUrl: embedPage, subtitles: subs, failed: false };
   } catch (e) {
     clearTimeout(timer);
     return { failed: true, embedUrl: embedPage };
@@ -454,7 +474,8 @@ window.playStream = async function(url, initialSeekTime = 0, preResolved = null)
   if (oldSubBar) oldSubBar.remove();
 
   const isDirectM3u8 = url.includes('.m3u8') && !url.includes('player.phimapi.com/player') && !url.includes('/embed/');
-  if (isDirectM3u8) {
+  const isDirectMp4 = (preResolved && preResolved.streamType === 'mp4') || /\.mp4(\?|$)/i.test(url) || url.includes('/videoplayback?');
+  if (isDirectM3u8 || isDirectMp4) {
     box.innerHTML = '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#00f0ff;font-size:16px;background:#000;padding:20px;text-align:center;"><div>⚡ Đang kết nối máy chủ phát sạch...</div><div id="vsmovLoadHint" style="font-size:12px;color:#8b94a7;"></div></div>';
 
     let finalUrl = url;
@@ -484,11 +505,13 @@ window.playStream = async function(url, initialSeekTime = 0, preResolved = null)
     if (seq !== currentPlaySeq) return;
     box.innerHTML = '';
 
+    const streamType = (isDirectMp4 && !finalUrl.includes('.m3u8')) ? 'mp4' : 'm3u8';
+
     try {
       const art = new Artplayer({
         container: box,
         url: finalUrl,
-        type: 'm3u8',
+        type: streamType,
         autoplay: true,
         autoSize: false,
         autoMini: false,
@@ -503,7 +526,7 @@ window.playStream = async function(url, initialSeekTime = 0, preResolved = null)
         airplay: true,
         theme: '#00f0ff',
         lang: 'vi',
-        customType: {
+        customType: streamType === 'm3u8' ? {
           m3u8: function(video, m3u8Url, artInst) {
             if (window.Hls && Hls.isSupported()) {
               if (artInst.hls) artInst.hls.destroy();
@@ -646,7 +669,7 @@ window.playStream = async function(url, initialSeekTime = 0, preResolved = null)
               video.src = m3u8Url;
             }
           }
-        },
+        } : {},
         subtitle: {
           url: '',
           type: 'vtt',
