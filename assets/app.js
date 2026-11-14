@@ -1341,7 +1341,8 @@ async function renderWatchPage(slug) {
     }
   } catch (e) {}
 
-  if (!movie || !movie.episodes || !movie.episodes.length) {
+  const hasIntlFallback = movie && (movie.tmdb_id || (movie.tmdb && movie.tmdb.id)) && shouldShowIntlSource(movie) && movie.type !== 'series' && movie.type !== 'tv';
+  if (!movie || ((!movie.episodes || !movie.episodes.length) && !hasIntlFallback)) {
     app.innerHTML = '<div style="max-width:600px;margin:80px auto;text-align:center;color:#ef4444;font-family:sans-serif;">' +
       '<h2 style="font-size:24px;margin-bottom:12px;">Phim này đã bị xóa do toàn bộ nguồn phát đều lỗi</h2>' +
       '<p style="color:#8b94a7;margin-top:10px;line-height:1.6;">Chúng tôi đã loại bỏ phim này để tránh lỗi vòng xoay vô tận.</p>' +
