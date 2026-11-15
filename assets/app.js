@@ -614,7 +614,7 @@ window.playStream = async function(url, initialSeekTime = 0, preResolved = null)
                 maxBufferLength: 60,
                 maxMaxBufferLength: 120,
                 maxBufferSize: 100 * 1000 * 1000,
-                maxBufferHole: 0.8,
+                maxBufferHole: 0.5,
                 highBufferWatchdogPeriod: 2,
                 nudgeOffset: 0.15,
                 nudgeMaxRetry: 5,
@@ -674,18 +674,17 @@ window.playStream = async function(url, initialSeekTime = 0, preResolved = null)
 
               let fatalRetryCount = 0;
               hls.on(Hls.Events.ERROR, function(evt, data) {
-                // Xử lý non-fatal BUFFER_STALLED_ERROR (bị kẹt micro-gap gây quay tròn)
+                // Xử lý non-fatal BUFFER_STALLED_ERROR (chỉ lướt qua micro-gap < 0.5s, không gọi startLoad() để tránh nhảy cóc segment)
                 if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || data.details === 'bufferStalledError') {
                   if (video.buffered && video.buffered.length > 0) {
                     for (let i = 0; i < video.buffered.length; i++) {
                       const bStart = video.buffered.start(i);
-                      if (bStart > video.currentTime && bStart - video.currentTime < 2.0) {
+                      if (bStart > video.currentTime && bStart - video.currentTime < 0.5) {
                         video.currentTime = bStart + 0.05;
                         break;
                       }
                     }
                   }
-                  hls.startLoad();
                   return;
                 }
 
@@ -717,24 +716,24 @@ window.playStream = async function(url, initialSeekTime = 0, preResolved = null)
                 }
                 if (video.readyState < 3 && Math.abs(video.currentTime - lastTrackedTime) < 0.05) {
                   stallSeconds++;
-                  // Sau 2s đứng hình: chỉ nhảy khi có vùng buffer sẵn phía trước và kích tải lại
-                  if (stallSeconds === 2) {
-                    hls.startLoad();
+                  // Sau 3s đứng hình: kích tải lại đúng mốc hiện tại (truyền currentTime để không nhảy cóc segment)
+                  if (stallSeconds === 3) {
+                    hls.startLoad(video.currentTime);
                     if (video.buffered && video.buffered.length > 0) {
                       for (let i = 0; i < video.buffered.length; i++) {
                         const bStart = video.buffered.start(i);
-                        if (bStart > video.currentTime && bStart - video.currentTime < 2.0) {
+                        if (bStart > video.currentTime && bStart - video.currentTime < 0.5) {
                           video.currentTime = bStart + 0.05;
                           break;
                         }
                       }
                     }
                   }
-                  // Sau 10s đứng hình: thông báo nhẹ và kích tải lại trên chính VSMov
+                  // Sau 10s đứng hình: thông báo nhẹ và kích tải lại đúng mốc hiện tại
                   if (stallSeconds >= 10) {
                     stallSeconds = 0;
-                    artInst.notice.show = '⏳ Máy chủ VSMov đang tải chậm (giờ cao điểm), vẫn đang giữ kết nối chính...';
-                    hls.startLoad();
+                    artInst.notice.show = '⏳ Máy chủ đang tải chậm (giờ cao điểm), vẫn đang giữ kết nối...';
+                    hls.startLoad(video.currentTime);
                   }
                 } else {
                   stallSeconds = 0;
