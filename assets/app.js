@@ -262,7 +262,7 @@ let e123MapCache = null;
 async function get123EmbedMap() {
   if (e123MapCache) return e123MapCache;
   try {
-    const r = await fetch('/data/123embed_m3u8_map.json');
+    const r = await fetch('/data/123embed_m3u8_map.json?v=20261115_v18');
     if (r.ok) {
       e123MapCache = await r.json();
       return e123MapCache;
@@ -1163,7 +1163,7 @@ let currentFilterYear = 'all';
 async function getCatalog() {
   if (allMovies) return allMovies;
   try {
-    const res = await fetch('/data/search_index.json');
+    const res = await fetch('/data/search_index.json?v=20261115_v18');
     if (res.ok) {
       allMovies = await res.json();
       allMovies.sort((a, b) => (b.y || 0) - (a.y || 0));
@@ -1266,7 +1266,7 @@ function handleRoute() {
     renderCatalogPage('🍿 Phim Chiếu Rạp Mới');
   } else {
     currentFilterType = 'all';
-    renderCatalogPage('🔥 Kho Phim Sạch 100% (7,071 Phim)');
+    renderCatalogPage('🔥 Kho Phim Sạch 100% (7,563 Phim)');
   }
 }
 
@@ -1334,7 +1334,7 @@ async function renderWatchPage(slug) {
   const h = Array.from(slug).reduce((acc, c) => acc + c.charCodeAt(0), 0) % 100;
   let movie = null;
   try {
-    const res = await fetch('/data/b/' + h + '.json');
+    const res = await fetch('/data/b/' + h + '.json?v=20261115_v18');
     if (res.ok) {
       const bucket = await res.json();
       movie = bucket[slug];
@@ -1616,7 +1616,7 @@ function renderResumeShelfHtml() {
 async function renderSearchResults(q) {
   const container = document.getElementById('app') || document.querySelector('main') || document.body;
   if (!container) return;
-  container.innerHTML = '<div style="text-align:center;padding:80px;color:#00f0ff;font-family:sans-serif;">Đang tìm kiếm trong kho 7,071 phim sạch...</div>';
+  container.innerHTML = '<div style="text-align:center;padding:80px;color:#00f0ff;font-family:sans-serif;">Đang tìm kiếm trong kho 7,563 phim sạch...</div>';
 
   const catalog = await getCatalog();
   const kw = q.toLowerCase().trim();
