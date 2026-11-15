@@ -346,6 +346,24 @@ async function resolve123EmbedData(tmdbId) {
   }
 }
 
+function parseVttTimeSec(ts) {
+  const parts = ts.split(':');
+  if (parts.length === 2) parts.unshift('00');
+  const h = parseInt(parts[0], 10) || 0;
+  const m = parseInt(parts[1], 10) || 0;
+  const s = parseFloat(parts[2]) || 0;
+  return h * 3600 + m * 60 + s;
+}
+
+function formatVttTimeSec(sec) {
+  const msTotal = Math.max(0, Math.round(sec * 1000));
+  const h = Math.floor(msTotal / 3600000);
+  const m = Math.floor((msTotal % 3600000) / 60000);
+  const s = Math.floor((msTotal % 60000) / 1000);
+  const ms = msTotal % 1000;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+}
+
 async function createCleanVttBlobUrl(vttUrl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
@@ -354,10 +372,34 @@ async function createCleanVttBlobUrl(vttUrl) {
     clearTimeout(timer);
     if (!resp.ok) return vttUrl;
     let text = await resp.text();
+    text = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    text = text.replace(/(\d{1,2}:\d{2}(?::\d{2})?),(\d{3})/g, '$1.$2');
+
+    // Kéo dài các cue quá ngắn (< 1.5s) để mắt đọc kịp mà không đè cue sau
+    const lines = text.split('\n');
+    const tsRe = /^(\d{1,2}:\d{2}(?::\d{2})?\.\d{3})\s*-->\s*(\d{1,2}:\d{2}(?::\d{2})?\.\d{3})(.*)$/;
+    const cues = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].trim().match(tsRe);
+      if (m) {
+        cues.push({ idx: i, start: parseVttTimeSec(m[1]), end: parseVttTimeSec(m[2]), rest: m[3] || '' });
+      }
+    }
+    for (let j = 0; j < cues.length; j++) {
+      const c = cues[j];
+      const nextStart = j + 1 < cues.length ? cues[j + 1].start : Infinity;
+      let end = c.end;
+      if (end - c.start < 1.5) {
+        end = Math.min(c.start + 1.5, nextStart - 0.05);
+      }
+      if (end > c.end) {
+        lines[c.idx] = `${formatVttTimeSec(c.start)} --> ${formatVttTimeSec(end)}${c.rest}`;
+      }
+    }
+    text = lines.join('\n');
     if (!text.trimStart().startsWith('WEBVTT')) {
       text = 'WEBVTT\n\n' + text;
     }
-    text = text.replace(/(\d{1,2}:\d{2}(?::\d{2})?),(\d{3})/g, '$1.$2');
     return URL.createObjectURL(new Blob([text], { type: 'text/vtt;charset=utf-8' }));
   } catch (e) {
     clearTimeout(timer);
@@ -893,6 +935,32 @@ function renderSubtitleButtons(box, subTracks, activeSub) {
     const flag = st.code === 'vie' ? '🇻🇳 ' : (st.code === 'zho' ? '🇨🇳 ' : (st.code === 'eng' ? '🇬🇧 ' : '🌐 '));
     bar.appendChild(makeBtn(flag + st.label, st.url, isAct));
   });
+
+  const syncWrap = document.createElement('div');
+  syncWrap.style.cssText = 'margin-left:auto;display:flex;align-items:center;gap:4px;';
+  const offsetVal = document.createElement('span');
+  offsetVal.id = 'subOffsetVal';
+  offsetVal.style.cssText = 'color:#8b94a7;font-size:11px;min-width:34px;text-align:center;';
+  offsetVal.textContent = '0.0s';
+
+  const makeSyncBtn = (txt, delta) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.style.cssText = 'padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#cbd5e1;';
+    b.textContent = txt;
+    b.onclick = () => {
+      if (!currentArtInstance) return;
+      const next = delta === 0 ? 0 : Math.round(((currentArtInstance.subtitleOffset || 0) + delta) * 10) / 10;
+      currentArtInstance.subtitleOffset = next;
+      offsetVal.textContent = (next > 0 ? '+' : '') + next.toFixed(1) + 's';
+      offsetVal.style.color = next === 0 ? '#8b94a7' : '#00f0ff';
+    };
+    return b;
+  };
+  syncWrap.appendChild(makeSyncBtn('-0.5s', -0.5));
+  syncWrap.appendChild(offsetVal);
+  syncWrap.appendChild(makeSyncBtn('+0.5s', 0.5));
+  bar.appendChild(syncWrap);
 
   box.after(bar);
 }
